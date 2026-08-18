@@ -1,0 +1,23 @@
+{
+  "_doc": "Mapping from intent (reads/runs/write/dispatches) → concrete action / command words. Users can edit this file to adjust boundaries. rules_dsl.py loads it to generate rules; on missing/broken file it falls back to built-in defaults.",
+
+  "read_actions": ["read_file", "list_dir", "read_image", "search_content", "search_files"],
+  "_read_actions_doc": "Semantic actions counted as 'read' after normalization (the action taken when an agent uses the read tool).",
+
+  "read_shell_verbs": ["cat", "bat", "sed", "awk", "grep", "egrep", "rg", "head", "tail", "less", "more", "nl", "wc", "xxd", "od", "jq", "yq"],
+  "_read_shell_verbs_doc": "Command words in shell counted as 'read file content' (when agent reads via shell, run_command starts with or contains these).",
+
+  "read_idioms": ["json\\.load", "\\.read\\(", "\\.readlines\\(", "open\\([^),]*\\)"],
+  "_read_idioms_doc": "Finer regexes for idioms that are certainly reads (for Python etc.): json.load(, .read(), open(single-arg = read mode). If the command contains both these idioms and the target file, it counts as a read. Note: open('x','w') (comma present = write mode) will not match, so writes are not misclassified as reads.",
+
+  "run_action": "run_command",
+  "run_prefixes": ["timeout\\s+\\d+\\s+", "sudo\\s+", "env\\s+", "\\w+=\\S+\\s+", "nice\\s+(?:-n\\s+\\d+\\s+)?", "exec\\s+", "stdbuf\\s+\\S+\\s+", "python3?\\s+-m\\s+"],
+  "_run_prefixes_doc": "Regexes for 'prefix words' stripped from the head of subcommands during runs matching (they are not the actually invoked program): timeout N, sudo, env, KEY=val, nice, exec, python -m, etc. After stripping, check whether the head is the target command.",
+
+  "write_actions": ["create_file", "modify_file", "append_file"],
+  "write_shell_ops": [">>", ">", "tee", "dd"],
+  "_write_shell_ops_doc": "Shell write redirection operators / commands: >, >>, tee, dd. never_writes will consider a write when these are followed by the target.",
+  "write_idioms": ["open\\([^)]*['\"][wa]", "\\.write\\(", "\\.writelines\\(", "json\\.dump\\(", "\\.to_csv\\(", "\\.to_json\\("],
+  "_write_idioms_doc": "Idioms that are certainly writes (Python etc.): open(...,'w'/'a'), .write(), json.dump(, .to_csv/.to_json. Writes inside scripts (path not in the command line) still cannot be captured.",
+  "dispatch_action": "spawn_subagent"
+}

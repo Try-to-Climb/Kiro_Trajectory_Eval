@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    name: unit tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: evalkit — normalize tests
+        working-directory: evalkit
+        run: python -m unittest discover -s normalize/tests -t . -v
+
+      - name: evalkit — trajectory tests
+        working-directory: evalkit
+        run: python -m unittest discover -s trajectory/tests -t . -v
+
+      - name: evalkit — sample rule smoke test
+        working-directory: evalkit
+        run: python -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
+
+      - name: eval-agent — unit tests
+        working-directory: eval-agent
+        env:
+          EVALKIT_DIR: ${{ github.workspace }}/evalkit
+        run: python -m unittest discover -s tests -t . -v
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint shell scripts
+        run: |
+          shellcheck install.sh hooks/*.sh hooks/demos/*.sh bin/kiro-trace || true
+          # Non-fatal for now; tighten in follow-up.

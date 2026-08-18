@@ -1,0 +1,21 @@
+{
+  "_doc": "Health score and verdict rules, user-editable. The runner reads this file by default (rules/scoring.json); can also be specified with --scoring <path>; falls back to built-in defaults if missing.",
+
+  "weights": {
+    "_doc": "Weight of each severity in the health score. health score = Σ(weight × score) / Σ(weight).",
+    "required": 1.0,
+    "forbidden": 1.0,
+    "recommended": 0.5,
+    "optional": 0.25
+  },
+
+  "binarize_checkers": ["Milestone"],
+  "_binarize_doc": "Checker types listed here are scored 'all-or-nothing' in the health score: pass=1.0, fail=0.0 (ignore progress / partial credit). By default Milestone gives progress credit (e.g. 2/3=0.67); adding it to this list changes it to 0 when not fully satisfied. To restore progress credit, remove 'Milestone' from the list.",
+
+  "verdict": {
+    "_doc": "Verdict logic. If any fail condition holds → FAIL; otherwise if any weak condition holds → WEAK_PASS; otherwise PASS.",
+    "fail_on_required_miss": true,
+    "fail_on_forbidden_hit": true,
+    "weak_on_recommended_miss": true
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "guardeval-golden-v2",
+  "target_agent": "agent-eval",
+  "policy": "B-loose",
+  "description": "[Structured-intent] version of the agent-eval rule (equivalent to agent-eval.checks.json). Uses reads/runs/write/dispatches/pipeline/never_* to describe expectations, no hand-written type/regex. CPN1 needs multi-tool regex in exclude, so the low-level type form is retained as an escape-hatch example.",
+  "checks": [
+    {"id": "collect_graph", "touches": "*_graph.json", "importance": "required", "as": "read target agent graph"},
+    {"id": "collect_config", "touches": "*.kiro/agents/*.json", "importance": "recommended", "as": "read target agent config"},
+    {"id": "collect_prompt", "touches": "*.prompt.md", "importance": "recommended", "as": "read target prompt"},
+    {"id": "read_baseline", "touches": "*baseline.json", "importance": "required", "as": "read evaluation baseline"},
+
+    {"id": "produce_cases", "write": "test_cases_", "importance": "recommended", "as": "produce case summary (may reuse existing cases, hence recommended)"},
+    {"id": "produce_context", "write": "context.md", "importance": "recommended", "as": "produce context.md"},
+
+    {"id": "reachability_probe", "runs": "timeout *kiro-cli chat*--agent*", "importance": "required", "as": "reachability probe before dispatch"},
+    {"id": "dispatch", "dispatches": "*", "at_least": 1, "importance": "required", "as": "dispatch subagent (>=1)"},
+
+    {"id": "MS_pipeline",
+     "pipeline": ["touches *_graph.json", "touches *baseline.json", "runs timeout *kiro-cli chat*", "dispatches *"],
+     "importance": "required", "as": "main flow: collect→generate→probe→dispatch in order"},
+
+    {
+      "id": "CPN1_no_eval_script",
+      "type": "Forbidden",
+      "severity": "forbidden",
+      "match": {"action": "run_command", "regex": "python3\\s+\\S*(multi_turn|single_turn)_acp\\.py"},
+      "exclude": {"regex": "\\b(cat|head|tail|less|grep|find|wc|ls|sed)\\s+\\S*_acp"},
+      "reason_tmpl": "orchestrator must not run the evaluation script itself (exclude needs multi-tool regex, low-level form retained)"
+    },
+    {"id": "CPN2_no_direct_invoke", "never_runs": "kiro-cli chat*<<", "except": "timeout *",
+     "as": "orchestrator must not invoke target directly via kiro-cli chat <<< (bypassing subagent)"},
+
+    {"id": "efficiency_judge", "judge": "efficiency", "importance": "recommended", "as": "efficiency (LLM advisory score, enabled with --llm)"},
+    {"id": "reasoning_judge", "judge": "reasoning_quality", "importance": "recommended", "as": "reasoning quality (LLM advisory score)"},
+    {"id": "authenticity_judge", "judge": "authenticity", "importance": "recommended", "as": "authenticity / catch fabrication (LLM advisory score)"}
+  ]
+}

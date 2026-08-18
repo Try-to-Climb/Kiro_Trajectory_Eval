@@ -1,0 +1,26 @@
+# Normalize line endings to LF across the repo
+* text=auto eol=lf
+
+# Shell scripts must be LF regardless of client OS
+*.sh    text eol=lf
+kiro-trace text eol=lf
+
+# JSON / Markdown / Python — text
+*.json  text
+*.md    text
+*.py    text
+*.toml  text
+*.yaml  text
+*.yml   text
+
+# Trace fixtures — treat as opaque, skip diffs
+*.jsonl -diff
+
+# Binary
+*.png   binary
+*.jpg   binary
+*.gz    binary
+*.zip   binary
+
+# GitHub linguist hints — mark auto-generated / vendored dirs
+evalkit/examples/** linguist-documentation

@@ -1,0 +1,83 @@
+{
+  "direction": "goal_completion",
+  "version": 1,
+  "mode": "scripted",
+  "contributes_to_verdict": true,
+  "question": "Did it accomplish what the user asked for?",
+
+  "requires": {
+    "source": "official",
+    "fields": [],
+    "optional": ["response", "reasoning"],
+    "degrade": {
+      "response": "outcome-type requirements cannot be verified via command output → s8 marks unverifiable or degrades to artifact evidence, and flags them as uncovered in the report",
+      "timestamps": "official-source Action.ts all empty → time window falls back to meta.created_at → recording file mtime (P5/P6)"
+    }
+  },
+
+  "budget": { "llm_calls": 8, "seconds": 3600 },
+  "retrieve": { "k": 8, "score_mode": "count" },
+  "controls": { "n": 1, "note": "synthetic negative controls must be judged false, otherwise the whole verdict is marked INVALID" },
+
+  "steps": [
+    { "id": "s1",  "type": "map",         "impl": "steps.s1_map",
+      "in": ["session_tree"], "out": "overview",
+      "purpose": "delimit the search boundary + capability probe: idx_range_per_turn / written_dirs / time_window / has_response" },
+
+    { "id": "s2",  "type": "extract",     "impl": "steps.s2_extract_requirements", "llm": true,
+      "in": ["ir.prompts", "overview.turns"], "out": "requirements",
+      "purpose": "multi-turn dialogue → list of verifiable atomic requirements (intent classification + status + strength)",
+      "validate": ["enum values", "origin_turn falls in 1..turns", "non-request turns must not produce requirements", "expect non-empty"] },
+
+    { "id": "s2b", "type": "control",     "impl": "steps.s2b_inject_controls",
+      "in": ["requirements"], "out": "requirements",
+      "purpose": "inject fabricated requirements that never appear in the trajectory as a built-in control group; only injected when their anchors have df=0 across the whole tree" },
+
+    { "id": "s3",  "type": "extract",     "impl": "steps.s3_extract_claims", "llm": true,
+      "in": ["ir.responses"], "out": "claims",
+      "purpose": "agent replies → list of self-claims (did/produced/verified/declined), used for overclaim reconciliation",
+      "validate": ["quote must be a fragment from the original text", "kind enum", "turn range"] },
+
+    { "id": "s4",  "type": "compile",     "impl": "steps.s4_compile", "llm": true,
+      "in": ["requirements", "overview.idx_range_per_turn"], "out": "criteria",
+      "purpose": "requirement → hard_check (deterministic criteria) + anchors (retrieval anchors) + residual; scope filled in by code",
+      "validate": ["hard_check only accepts three keys", "artifact_glob must not contain curly braces", "anchors non-empty and short terms"] },
+
+    { "id": "s5",  "type": "search",      "impl": "steps.s5_search",
+      "in": ["criteria"], "out": "search",
+      "purpose": "two tracks: hard_check exact lookup + anchors retrieve top-K. Output tri-state (hard/candidates/absent), no verdict",
+      "notes": ["dual query in-scope + whole-tree, out-of-scope hits marked evidence_before_request (P3)",
+                "when absent, partition anchors by df into suspect_anchors / no_scoring_action (P4)"] },
+
+    { "id": "s6",  "type": "probe",       "impl": "steps.s6_probe",
+      "in": ["search"], "out": "probe",
+      "purpose": "supplementary probe for absent / low-candidate requirements: same-family write actions + trajectory vocabulary samples (action distribution / command head words / files written)",
+      "notes": ["vocabulary samples let s8 distinguish 'wrong anchor wording' from 'really didn't do it' — both give df=0"] },
+
+    { "id": "s7",  "type": "crosscheck",  "impl": "steps.s7_crosscheck",
+      "in": ["criteria.artifact_glob", "overview.written_dirs", "overview.time_window"], "out": "crosscheck",
+      "purpose": "filesystem cross-check to fill trajectory blind spots (files written from inside scripts do not appear in the trajectory)",
+      "notes": ["file class: mtime within run time window → strong, otherwise stale",
+                "shared state (ports/processes) is always info, not evidence — cannot be attributed to this run"] },
+
+    { "id": "s8",  "type": "judge",       "impl": "steps.s8_judge", "llm": true,
+      "in": ["requirements", "claims", "criteria", "search", "probe", "crosscheck"], "out": "findings",
+      "purpose": "assemble evidence bundle → per-item verdict satisfied / tier / overclaim + reason",
+      "validate": ["evidence_actions must be a subset of refs appearing in the evidence bundle (catch hallucinations)",
+                   "satisfied and tier enum", "each item must have a reason"],
+      "notes": ["confidence is not given by the LLM; it is derived from the tier ceiling + presence of residual (schema.cap_confidence)"] },
+
+    { "id": "s9",  "type": "aggregate",   "impl": "steps.s9_aggregate",
+      "in": ["findings"], "out": "aggregate",
+      "purpose": "only count requirements with status=active and strength=strong; if control group not caught → verdict=INVALID" }
+  ],
+
+  "parallel": [["s1", "s2", "s3"], ["s4->s5->s6", "s7"]],
+
+  "verdict_rules": {
+    "FAIL": "there exists a strong/active requirement with satisfied=false, or an overclaim exists",
+    "WEAK_PASS": "no unmet requirements, but unverifiable ones exist",
+    "PASS": "all strong/active requirements satisfied and no overclaim",
+    "INVALID": "built-in control group was not judged false — verdict is too lenient, this run's result is not trustworthy"
+  }
+}

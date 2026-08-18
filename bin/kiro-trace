@@ -1,0 +1,404 @@
+#!/bin/bash
+# =============================================================================
+# kiro-trace - Agent behavior trace viewing and analysis tool
+#
+# Usage:
+#   kiro-trace list                    List all traced sessions
+#   kiro-trace show <session-id>       Show the full trace of a session
+#   kiro-trace summary <session-id>    Show summary statistics for a session
+#   kiro-trace tools <session-id>      Show tool usage details
+#   kiro-trace timeline <session-id>   Timeline view
+#   kiro-trace tail [session-id]       Follow the latest session in real time
+#   kiro-trace export <session-id>     Export as a readable report
+#   kiro-trace clean [--days N]        Remove traces older than N days
+# =============================================================================
+
+set -euo pipefail
+
+TRACE_DIR="${KIRO_TRACE_DIR:-$HOME/agent-trace/traces}"
+
+# Resolve session directory, supporting both flat ($TRACE_DIR/<sid>) and daily ($TRACE_DIR/<date>/<sid>) layouts
+resolve_session_dir() {
+    local sid="$1"
+    if [ -d "$TRACE_DIR/$sid" ]; then
+        echo "$TRACE_DIR/$sid"; return
+    fi
+    find "$TRACE_DIR" -maxdepth 2 -type d -name "$sid" 2>/dev/null | head -1
+}
+
+
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+GRAY='\033[0;90m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+usage() {
+    echo "Usage: kiro-trace <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  list                    List all traced sessions"
+    echo "  show <session-id>       Show the full trace of a session"
+    echo "  summary <session-id>    Show summary statistics for a session"
+    echo "  tools <session-id>      Show tool usage details"
+    echo "  timeline <session-id>   Timeline view"
+    echo "  tail [session-id]       Follow in real time (defaults to the latest session)"
+    echo "  export <session-id>     Export as a Markdown report"
+    echo "  clean [--days N]        Remove traces older than N days (default 7)"
+    echo ""
+    echo "Environment variables:"
+    echo "  KIRO_TRACE_DIR          Trace storage directory (default ~/agent-trace/traces)"
+}
+
+cmd_list() {
+    if [ ! -d "$TRACE_DIR" ]; then
+        echo "No traces found at $TRACE_DIR"
+        exit 0
+    fi
+
+    echo -e "${BOLD}=== Traced Sessions ===${NC}"
+    echo ""
+    printf "%-30s %-38s %-22s %-6s %-6s %s\n" "NAME" "SESSION ID" "STARTED" "TURNS" "TOOLS" "CWD"
+    echo "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
+
+    for tf in $(find "$TRACE_DIR" -maxdepth 3 -name trace.jsonl 2>/dev/null); do
+        session_dir=$(dirname "$tf")/
+        [ -d "$session_dir" ] || continue
+        SESSION_ID=$(basename "$session_dir")
+        # Skip the by-name symlink directory
+        [ "$SESSION_ID" = "by-name" ] && continue
+        
+        META_FILE="$session_dir/meta.json"
+        STAT_FILE="$session_dir/stats.json"
+        
+        STARTED="unknown"
+        TURNS=0
+        TOOLS=0
+        CWD="unknown"
+        FNAME=""
+        
+        if [ -f "$META_FILE" ]; then
+            STARTED=$(jq -r '.started_at // "unknown"' "$META_FILE" | cut -c1-19)
+            CWD=$(jq -r '.cwd // "unknown"' "$META_FILE" | sed "s|$HOME|~|")
+            FNAME=$(jq -r '.friendly_name // ""' "$META_FILE")
+        fi
+        
+        if [ -f "$STAT_FILE" ]; then
+            TURNS=$(jq -r '.turn_count // 0' "$STAT_FILE")
+            TOOLS=$(jq -r '.tool_calls // 0' "$STAT_FILE")
+        fi
+        
+        printf "%-30s %-38s %-22s %-6s %-6s %s\n" "${FNAME:-"-"}" "$SESSION_ID" "$STARTED" "$TURNS" "$TOOLS" "$CWD"
+    done
+}
+
+cmd_show() {
+    local SESSION_ID="${1:-}"
+    if [ -z "$SESSION_ID" ]; then
+        echo "Error: session-id required"
+        exit 1
+    fi
+    
+    local SESSION_DIR; SESSION_DIR=$(resolve_session_dir "$SESSION_ID")
+    if [ ! -d "$SESSION_DIR" ]; then
+        echo "Error: session not found: $SESSION_ID"
+        exit 1
+    fi
+    
+    local TRACE_FILE="$SESSION_DIR/trace.jsonl"
+    if [ ! -f "$TRACE_FILE" ]; then
+        echo "No trace data for session: $SESSION_ID"
+        exit 0
+    fi
+    
+    echo -e "${BOLD}=== Full Trace: $SESSION_ID ===${NC}"
+    echo ""
+    
+    while IFS= read -r line; do
+        EVENT_TYPE=$(echo "$line" | jq -r '.event')
+        TS=$(echo "$line" | jq -r '.ts' | cut -c12-19)
+        
+        case "$EVENT_TYPE" in
+            agent_spawn)
+                echo -e "${GREEN}[$TS] 🚀 Agent Spawned${NC}"
+                CWD=$(echo "$line" | jq -r '.cwd')
+                echo -e "         cwd: $CWD"
+                ;;
+            user_prompt)
+                echo -e "${BLUE}[$TS] 💬 User Prompt${NC}"
+                PROMPT_LEN=$(echo "$line" | jq -r '.prompt_length')
+                PROMPT=$(echo "$line" | jq -r '.prompt' | head -c 100)
+                echo -e "         ${GRAY}($PROMPT_LEN chars) $PROMPT${NC}"
+                ;;
+            pre_tool_use)
+                TOOL=$(echo "$line" | jq -r '.tool')
+                SUMMARY=$(echo "$line" | jq -r '.summary')
+                echo -e "${YELLOW}[$TS] 🔧 Tool Call: ${BOLD}$TOOL${NC}"
+                echo -e "         ${GRAY}$SUMMARY${NC}"
+                ;;
+            post_tool_use)
+                TOOL=$(echo "$line" | jq -r '.tool')
+                SUCCESS=$(echo "$line" | jq -r '.success')
+                INFO=$(echo "$line" | jq -r '.result_info')
+                if [ "$SUCCESS" = "true" ]; then
+                    echo -e "${GREEN}[$TS] ✅ Tool Result: $TOOL${NC}"
+                else
+                    echo -e "${RED}[$TS] ❌ Tool Failed: $TOOL${NC}"
+                fi
+                echo -e "         ${GRAY}$INFO${NC}"
+                ;;
+            tool_blocked)
+                TOOL=$(echo "$line" | jq -r '.tool')
+                REASON=$(echo "$line" | jq -r '.reason')
+                echo -e "${RED}[$TS] 🚫 BLOCKED: $TOOL${NC}"
+                echo -e "         ${RED}Reason: $REASON${NC}"
+                ;;
+            stop)
+                TURN=$(echo "$line" | jq -r '.turn')
+                LEN=$(echo "$line" | jq -r '.response_length')
+                echo -e "${CYAN}[$TS] 🏁 Response Complete (Turn $TURN, $LEN chars)${NC}"
+                ;;
+            *)
+                echo -e "${GRAY}[$TS] ? $EVENT_TYPE${NC}"
+                ;;
+        esac
+    done < "$TRACE_FILE"
+}
+
+cmd_summary() {
+    local SESSION_ID="${1:-}"
+    if [ -z "$SESSION_ID" ]; then
+        echo "Error: session-id required"
+        exit 1
+    fi
+    
+    local SESSION_DIR; SESSION_DIR=$(resolve_session_dir "$SESSION_ID")
+    local STAT_FILE="$SESSION_DIR/stats.json"
+    local META_FILE="$SESSION_DIR/meta.json"
+    
+    echo -e "${BOLD}=== Session Summary ===${NC}"
+    echo ""
+    
+    if [ -f "$META_FILE" ]; then
+        echo -e "${BOLD}Session:${NC}  $SESSION_ID"
+        echo -e "${BOLD}Started:${NC}  $(jq -r '.started_at' "$META_FILE")"
+        echo -e "${BOLD}CWD:${NC}      $(jq -r '.cwd' "$META_FILE")"
+        echo -e "${BOLD}Host:${NC}     $(jq -r '.hostname' "$META_FILE")"
+        echo ""
+    fi
+    
+    if [ -f "$STAT_FILE" ]; then
+        echo -e "${BOLD}Statistics:${NC}"
+        echo -e "  Prompts:           $(jq '.prompt_count // 0' "$STAT_FILE")"
+        echo -e "  Turns:             $(jq '.turn_count // 0' "$STAT_FILE")"
+        echo -e "  Tool Calls:        $(jq '.tool_calls // 0' "$STAT_FILE")"
+        echo -e "  Tools Blocked:     $(jq '.tool_blocked // 0' "$STAT_FILE")"
+        echo -e "  Total Prompt Chars: $(jq '.total_prompt_chars // 0' "$STAT_FILE")"
+        echo -e "  Total Response Chars: $(jq '.total_response_chars // 0' "$STAT_FILE")"
+        echo ""
+        echo -e "${BOLD}Tools Used:${NC}"
+        jq -r '.tools_used // {} | to_entries | sort_by(-.value) | .[] | "  \(.key): \(.value) calls"' "$STAT_FILE"
+    fi
+}
+
+cmd_tools() {
+    local SESSION_ID="${1:-}"
+    if [ -z "$SESSION_ID" ]; then
+        echo "Error: session-id required"
+        exit 1
+    fi
+    
+    local SESSION_DIR; SESSION_DIR=$(resolve_session_dir "$SESSION_ID")
+    local TRACE_FILE="$SESSION_DIR/trace.jsonl"
+    
+    echo -e "${BOLD}=== Tool Usage Detail ===${NC}"
+    echo ""
+    
+    # Group and count by tool name
+    echo -e "${BOLD}Tool Call Summary:${NC}"
+    grep '"event":"pre_tool_use"' "$TRACE_FILE" | \
+        jq -r '.tool' | sort | uniq -c | sort -rn | \
+        while read count tool; do
+            echo -e "  $tool: ${GREEN}$count${NC} calls"
+        done
+    
+    echo ""
+    echo -e "${BOLD}Chronological Tool Calls:${NC}"
+    grep '"event":"pre_tool_use"' "$TRACE_FILE" | \
+        jq -r '"\(.ts | .[11:19]) \(.tool) → \(.summary)"' | \
+        while IFS= read -r line; do
+            echo "  $line"
+        done
+}
+
+cmd_timeline() {
+    local SESSION_ID="${1:-}"
+    if [ -z "$SESSION_ID" ]; then
+        echo "Error: session-id required"
+        exit 1
+    fi
+    
+    local SESSION_DIR; SESSION_DIR=$(resolve_session_dir "$SESSION_ID")
+    local TRACE_FILE="$SESSION_DIR/trace.jsonl"
+    
+    echo -e "${BOLD}=== Timeline View ===${NC}"
+    echo ""
+    
+    local PREV_TS=""
+    while IFS= read -r line; do
+        TS=$(echo "$line" | jq -r '.ts' | cut -c12-23)
+        EVENT=$(echo "$line" | jq -r '.event')
+        
+        # Compact timeline format
+        ICON=""
+        DESC=""
+        case "$EVENT" in
+            agent_spawn)   ICON="🚀"; DESC="Agent Start";;
+            user_prompt)   ICON="💬"; DESC="Prompt ($(echo "$line" | jq -r '.prompt_length') chars)";;
+            pre_tool_use)  ICON="🔧"; DESC="$(echo "$line" | jq -r '.tool') → $(echo "$line" | jq -r '.summary' | head -c 60)";;
+            post_tool_use) ICON="✅"; DESC="$(echo "$line" | jq -r '.tool') done ($(echo "$line" | jq -r '.result_info'))";;
+            tool_blocked)  ICON="🚫"; DESC="BLOCKED: $(echo "$line" | jq -r '.tool')";;
+            stop)          ICON="🏁"; DESC="Turn $(echo "$line" | jq -r '.turn') complete";;
+            *)             ICON="?";  DESC="$EVENT";;
+        esac
+        
+        echo "$TS $ICON $DESC"
+    done < "$TRACE_FILE"
+}
+
+cmd_tail() {
+    local SESSION_ID="${1:-}"
+    
+    if [ -z "$SESSION_ID" ]; then
+        # Find the latest session
+        SESSION_ID=$(find "$TRACE_DIR" -maxdepth 3 -name trace.jsonl 2>/dev/null -printf "%T@ %h\n" | sort -rn | head -1 | sed "s|.* ||" | xargs -r basename)
+        if [ -z "$SESSION_ID" ]; then
+            echo "No sessions found"
+            exit 1
+        fi
+    fi
+    
+    local TRACE_FILE; TRACE_FILE="$(resolve_session_dir "$SESSION_ID")/trace.jsonl"
+    
+    echo -e "${BOLD}Tailing session: $SESSION_ID${NC}"
+    echo "Press Ctrl+C to stop"
+    echo ""
+    
+    tail -f "$TRACE_FILE" 2>/dev/null | while IFS= read -r line; do
+        TS=$(echo "$line" | jq -r '.ts' | cut -c12-19)
+        EVENT=$(echo "$line" | jq -r '.event')
+        TOOL=$(echo "$line" | jq -r '.tool // ""')
+        
+        case "$EVENT" in
+            pre_tool_use)  echo -e "${YELLOW}[$TS] 🔧 $TOOL${NC}";;
+            post_tool_use) echo -e "${GREEN}[$TS] ✅ $TOOL${NC}";;
+            tool_blocked)  echo -e "${RED}[$TS] 🚫 $TOOL BLOCKED${NC}";;
+            user_prompt)   echo -e "${BLUE}[$TS] 💬 Prompt${NC}";;
+            stop)          echo -e "${CYAN}[$TS] 🏁 Turn done${NC}";;
+            *)             echo -e "${GRAY}[$TS] $EVENT${NC}";;
+        esac
+    done
+}
+
+cmd_export() {
+    local SESSION_ID="${1:-}"
+    if [ -z "$SESSION_ID" ]; then
+        echo "Error: session-id required"
+        exit 1
+    fi
+    
+    local SESSION_DIR; SESSION_DIR=$(resolve_session_dir "$SESSION_ID")
+    local TRACE_FILE="$SESSION_DIR/trace.jsonl"
+    local META_FILE="$SESSION_DIR/meta.json"
+    local STAT_FILE="$SESSION_DIR/stats.json"
+    local OUTPUT_FILE="$SESSION_DIR/report.md"
+    
+    {
+        echo "# Agent Trace Report"
+        echo ""
+        echo "## Session Info"
+        echo ""
+        
+        if [ -f "$META_FILE" ]; then
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Session ID | $SESSION_ID |"
+            echo "| Started | $(jq -r '.started_at' "$META_FILE") |"
+            echo "| CWD | $(jq -r '.cwd' "$META_FILE") |"
+            echo "| Host | $(jq -r '.hostname' "$META_FILE") |"
+            echo ""
+        fi
+        
+        echo "## Statistics"
+        echo ""
+        if [ -f "$STAT_FILE" ]; then
+            echo "- Prompts: $(jq '.prompt_count // 0' "$STAT_FILE")"
+            echo "- Turns: $(jq '.turn_count // 0' "$STAT_FILE")"
+            echo "- Tool Calls: $(jq '.tool_calls // 0' "$STAT_FILE")"
+            echo "- Tools Blocked: $(jq '.tool_blocked // 0' "$STAT_FILE")"
+            echo ""
+            echo "### Tools Used"
+            echo ""
+            jq -r '.tools_used // {} | to_entries | sort_by(-.value) | .[] | "- \(.key): \(.value)"' "$STAT_FILE"
+            echo ""
+        fi
+        
+        echo "## Event Timeline"
+        echo ""
+        echo '```'
+        while IFS= read -r line; do
+            TS=$(echo "$line" | jq -r '.ts' | cut -c12-23)
+            EVENT=$(echo "$line" | jq -r '.event')
+            case "$EVENT" in
+                agent_spawn)   echo "$TS 🚀 Agent Start";;
+                user_prompt)   echo "$TS 💬 Prompt ($(echo "$line" | jq -r '.prompt_length') chars)";;
+                pre_tool_use)  echo "$TS 🔧 $(echo "$line" | jq -r '.tool') → $(echo "$line" | jq -r '.summary')";;
+                post_tool_use) echo "$TS ✅ $(echo "$line" | jq -r '.tool') ($(echo "$line" | jq -r '.result_info'))";;
+                tool_blocked)  echo "$TS 🚫 BLOCKED $(echo "$line" | jq -r '.tool'): $(echo "$line" | jq -r '.reason')";;
+                stop)          echo "$TS 🏁 Turn $(echo "$line" | jq -r '.turn') complete";;
+            esac
+        done < "$TRACE_FILE"
+        echo '```'
+    } > "$OUTPUT_FILE"
+    
+    echo "Report exported to: $OUTPUT_FILE"
+}
+
+cmd_clean() {
+    local DAYS=7
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days) DAYS="$2"; shift 2;;
+            *) shift;;
+        esac
+    done
+    
+    echo "Cleaning traces older than $DAYS days..."
+    find "$TRACE_DIR" -maxdepth 1 -type d -mtime "+$DAYS" -exec rm -rf {} \;
+    echo "Done."
+}
+
+# Main entry point
+COMMAND="${1:-}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    list)     cmd_list "$@";;
+    show)     cmd_show "$@";;
+    summary)  cmd_summary "$@";;
+    tools)    cmd_tools "$@";;
+    timeline) cmd_timeline "$@";;
+    tail)     cmd_tail "$@";;
+    export)   cmd_export "$@";;
+    clean)    cmd_clean "$@";;
+    -h|--help|help|"")  usage;;
+    *)
+        echo "Unknown command: $COMMAND"
+        usage
+        exit 1
+        ;;
+esac

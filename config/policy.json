@@ -1,0 +1,22 @@
+{
+  "description": "Agent behavior tracing policy config - defines which operations should be blocked",
+  "denied_tools": [],
+  "denied_commands": [
+    "rm\\s+-rf\\s+/",
+    "sudo\\s+rm",
+    ":(){ :|:& };:",
+    "mkfs\\.",
+    "dd\\s+if=.+of=/dev/"
+  ],
+  "denied_paths": [
+    "^/etc/",
+    "^/boot/",
+    "^\\.ssh/",
+    "^.*\\.pem$",
+    "^.*\\.key$"
+  ],
+  "alert_on": {
+    "tools": ["use_aws", "shell"],
+    "patterns": ["DELETE", "DROP TABLE", "force-push"]
+  }
+}

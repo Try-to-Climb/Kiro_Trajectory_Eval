@@ -1,0 +1,44 @@
+{
+  "_doc": "Sanitized minimal sample: can be directly evaluated with example-minimal.checks.json, or exported as OTLP. All content is placeholder data.",
+  "session_id": "example-0000",
+  "source": "examples/sample.normalized.json",
+  "agent_name": "my-agent",
+  "turns": 1,
+  "runs": 1,
+  "prompts": ["Please look at the project structure and summarize"],
+  "responses": ["Read README and produced a summary"],
+  "warnings": [],
+  "official": null,
+  "actions": [
+    {"idx": 0, "call_idx": 0, "op_idx": 0, "ts": "2026-01-01T00:00:00.000Z",
+     "turn": 1, "run": 1, "raw_tool": "fs_read", "tool": "read", "action": "list_dir",
+     "path": "/home/user/project", "root": null, "command": null, "subcommands": [],
+     "pattern": null, "reasoning": "Look at what files exist in the project first", "response": null,
+     "completed": true, "blocked": false, "duration_ms": 12, "resp_size": 340,
+     "tool_use_id": "tu0", "error": null, "official_verified": false, "args": {}},
+
+    {"idx": 1, "call_idx": 1, "op_idx": 0, "ts": "2026-01-01T00:00:01.000Z",
+     "turn": 1, "run": 1, "raw_tool": "fs_read", "tool": "read", "action": "read_file",
+     "path": "/home/user/project/README.md", "root": null, "command": null,
+     "subcommands": [], "pattern": null, "reasoning": "Read README to understand project purpose",
+     "response": null, "completed": true, "blocked": false, "duration_ms": 8,
+     "resp_size": 1200, "tool_use_id": "tu1", "error": null,
+     "official_verified": false, "args": {}},
+
+    {"idx": 2, "call_idx": 2, "op_idx": 0, "ts": "2026-01-01T00:00:02.000Z",
+     "turn": 1, "run": 1, "raw_tool": "execute_bash", "tool": "shell",
+     "action": "run_command", "path": null, "root": "/home/user/project",
+     "command": "ls -la", "subcommands": ["ls -la"], "pattern": null,
+     "reasoning": "List detailed file info", "response": null, "completed": true,
+     "blocked": false, "duration_ms": 20, "resp_size": 560, "tool_use_id": "tu2",
+     "error": null, "official_verified": false, "args": {}},
+
+    {"idx": 3, "call_idx": 3, "op_idx": 0, "ts": "2026-01-01T00:00:03.000Z",
+     "turn": 1, "run": 1, "raw_tool": "summary", "tool": "summary",
+     "action": "summarize", "path": null, "root": null, "command": null,
+     "subcommands": [], "pattern": "Summarize project structure", "reasoning": "Wrap-up summary for the user",
+     "response": null, "completed": true, "blocked": false, "duration_ms": 5,
+     "resp_size": 200, "tool_use_id": "tu3", "error": null,
+     "official_verified": false, "args": {}}
+  ]
+}

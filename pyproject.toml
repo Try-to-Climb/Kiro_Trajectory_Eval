@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiro-eval"
+version = "0.1.0"
+description = "Trajectory-level agent evaluation toolkit: declarative rules (evalkit) + forensic pipeline (eval-agent) + optional hook collector."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["agent", "evaluation", "trajectory", "llm", "opentelemetry", "kiro"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Monitoring",
+]
+authors = [{ name = "Try-to-Climb", email = "307973447@qq.com" }]
+
+# Core is intentionally zero-dependency. See optional extras below.
+dependencies = []
+
+[project.optional-dependencies]
+viz  = ["matplotlib>=3.5"]
+test = []
+dev  = ["ruff>=0.5", "matplotlib>=3.5"]
+
+[project.urls]
+Homepage = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval"
+Issues   = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/issues"
+Changelog = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/blob/master/CHANGELOG.md"
+
+# Both evalkit and eval-agent are runnable as -m modules from their own directories;
+# no top-level package is installed via pip yet. This file exists to declare metadata,
+# python-requires, and optional extras.
+[tool.setuptools]
+packages = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # long lines are common in trace/regex fixtures

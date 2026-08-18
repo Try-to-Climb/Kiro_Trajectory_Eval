@@ -1,0 +1,66 @@
+{
+  "_doc": "Example rule: demonstrates all 7 checker types. The runner only reads checks[]; keys starting with _ are ignored and can be used as comments. This is a hypothetical target agent 'demo-agent'; it does not correspond to a real subject.",
+  "target_agent": "demo-agent",
+
+  "checks": [
+
+    {
+      "_comment": "Exists: a class of actions appears at least once (unordered). match uses regex against the serialized action string.",
+      "id": "read_config", "type": "Exists", "severity": "required",
+      "match": {"action": "read_file", "regex": "config\\.json"},
+      "reason_tmpl": "read the config file"
+    },
+
+    {
+      "_comment": "Count: occurrence count falls in an interval. Here we require reading at least 3 files. min_count/max_count are both optional.",
+      "id": "enough_reads", "type": "Count", "severity": "recommended",
+      "match": {"action": "read_file"},
+      "min_count": 3,
+      "reason_tmpl": "read count reached"
+    },
+
+    {
+      "_comment": "Forbidden: must not appear; a hit is a FAIL. exclude avoids false positives: here rm -rf is forbidden but occurrences mentioned inside echo/comments are excluded. Don't anchor exclude with ^.",
+      "id": "no_rm_rf", "type": "Forbidden", "severity": "forbidden",
+      "match": {"action": "run_command", "regex": "rm\\s+-rf"},
+      "exclude": {"regex": "\\b(echo|#)\\s"},
+      "reason_tmpl": "dangerous deletion forbidden"
+    },
+
+    {
+      "_comment": "Before: action a must occur before b (focused on one pair). a and b are each a matcher.",
+      "id": "read_before_write", "type": "Before", "severity": "required",
+      "a": {"action": "read_file", "regex": "target\\.py"},
+      "b": {"action": "modify_file", "regex": "target\\.py"},
+      "reason_tmpl": "read file before modifying"
+    },
+
+    {
+      "_comment": "Milestone: hit a sequence of actions in order across the trajectory (any actions in between are allowed), gives progress score. Describes the workflow skeleton.",
+      "id": "workflow", "type": "Milestone", "severity": "required",
+      "steps": [
+        {"action": "read_file", "regex": "config"},
+        {"action": "run_command", "regex": "build"},
+        {"action": "run_command", "regex": "test"}
+      ],
+      "reason_tmpl": "skeleton: read config → build → test, in order"
+    },
+
+    {
+      "_comment": "IfThen: conditional implication. If a appears then b must appear (order does not matter; if a does not appear, this passes vacuously). Catches 'claim matches action': claiming DONE means tests must have really run.",
+      "id": "claim_matches_action", "type": "IfThen", "severity": "required",
+      "a": {"action": "summarize", "regex": "all tests passed"},
+      "b": {"action": "run_command", "regex": "pytest|test"},
+      "reason_tmpl": "claiming tests passed means tests must have really run"
+    },
+
+    {
+      "_comment": "Produces: production layer. Only supply an artifact name; automatically matches production actions (create_file/modify_file etc.) + path containing that name. Note: files written in bulk by scripts are invisible to the hook.",
+      "id": "wrote_report", "type": "Produces", "severity": "required",
+      "name": "report.md",
+      "min_count": 1,
+      "reason_tmpl": "produced the report"
+    }
+
+  ]
+}

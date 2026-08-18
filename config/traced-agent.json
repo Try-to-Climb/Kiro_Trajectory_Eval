@@ -1,0 +1,23 @@
+{
+  "name": "traced-agent",
+  "description": "Kiro Agent with full behavior tracing - logs all operations to JSONL log",
+  "prompt": "You are a helpful assistant with full behavior tracing enabled. All your tool calls and responses are being logged for audit purposes.",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "use_aws", "subagent", "knowledge"],
+  "hooks": {
+    "agentSpawn": [
+      {"command": "$HOME/agent-trace/hooks/trace-hook.sh", "timeout_ms": 5000}
+    ],
+    "userPromptSubmit": [
+      {"command": "$HOME/agent-trace/hooks/trace-hook.sh", "timeout_ms": 5000}
+    ],
+    "preToolUse": [
+      {"matcher": "*", "command": "$HOME/agent-trace/hooks/trace-hook.sh", "timeout_ms": 5000}
+    ],
+    "postToolUse": [
+      {"matcher": "*", "command": "$HOME/agent-trace/hooks/trace-hook.sh", "timeout_ms": 5000}
+    ],
+    "stop": [
+      {"command": "$HOME/agent-trace/hooks/trace-hook.sh", "timeout_ms": 5000}
+    ]
+  }
+}

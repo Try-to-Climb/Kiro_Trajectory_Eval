@@ -1,0 +1,150 @@
+{
+  "$schema": "guardeval-golden-v2",
+  "target_agent": "agent-eval",
+  "policy": "B-loose",
+  "description": "GuardEval orchestrator rule, based on the workflow (collect→generate cases→probe→dispatch) and Execution Boundary in .kiro/prompt/agent-eval.md. Declarative, each entry = one checker. See rules/scoring.json for verdict/health score.",
+  "checks": [
+    {
+      "id": "collect_graph",
+      "type": "Exists",
+      "severity": "required",
+      "match": {
+        "regex": "eval-output/graph|_graph\\.json"
+      },
+      "reason_tmpl": "read target agent graph"
+    },
+    {
+      "id": "collect_config",
+      "type": "Exists",
+      "severity": "recommended",
+      "match": {
+        "regex": "\\.kiro/agents/[\\w./-]+\\.json"
+      },
+      "reason_tmpl": "read target agent config"
+    },
+    {
+      "id": "collect_prompt",
+      "type": "Exists",
+      "severity": "recommended",
+      "match": {
+        "regex": "\\.prompt\\.md|resource/prompt"
+      },
+      "reason_tmpl": "read target prompt"
+    },
+    {
+      "id": "read_baseline",
+      "type": "Exists",
+      "severity": "required",
+      "match": {
+        "regex": "baseline\\.json"
+      },
+      "reason_tmpl": "read evaluation baseline"
+    },
+    {
+      "id": "produce_cases",
+      "type": "Produces",
+      "severity": "recommended",
+      "name": "test_cases_",
+      "min_count": 1,
+      "reason_tmpl": "produce case summary (may reuse existing cases, hence recommended)"
+    },
+    {
+      "id": "produce_context",
+      "type": "Produces",
+      "severity": "recommended",
+      "name": "context.md",
+      "reason_tmpl": "produce context.md"
+    },
+    {
+      "id": "reachability_probe",
+      "type": "Exists",
+      "severity": "required",
+      "match": {
+        "action": "run_command",
+        "regex": "timeout \\d+.*kiro-cli chat.*--agent"
+      },
+      "reason_tmpl": "reachability probe before dispatch"
+    },
+    {
+      "id": "dispatch",
+      "type": "Count",
+      "severity": "required",
+      "match": {
+        "action": "spawn_subagent"
+      },
+      "min_count": 1,
+      "reason_tmpl": "dispatch subagent (>=1)"
+    },
+    {
+      "id": "MS_pipeline",
+      "type": "Milestone",
+      "severity": "required",
+      "steps": [
+        {
+          "regex": "eval-output/graph|_graph\\.json"
+        },
+        {
+          "regex": "baseline\\.json|test_cases_"
+        },
+        {
+          "action": "run_command",
+          "regex": "timeout \\d+.*kiro-cli chat"
+        },
+        {
+          "action": "spawn_subagent"
+        }
+      ],
+      "reason_tmpl": "main flow: collect→generate→probe→dispatch in order"
+    },
+    {
+      "id": "CPN1_no_eval_script",
+      "type": "Forbidden",
+      "severity": "forbidden",
+      "match": {
+        "action": "run_command",
+        "regex": "python3\\s+\\S*(multi_turn|single_turn)_acp\\.py"
+      },
+      "exclude": {
+        "regex": "\\b(cat|head|tail|less|grep|find|wc|ls|sed)\\s+\\S*_acp"
+      },
+      "reason_tmpl": "orchestrator must not run the evaluation script itself"
+    },
+    {
+      "id": "CPN2_no_direct_invoke",
+      "type": "Forbidden",
+      "severity": "forbidden",
+      "match": {
+        "action": "run_command",
+        "regex": "kiro-cli chat.*<<"
+      },
+      "exclude": {
+        "regex": "timeout \\d+"
+      },
+      "reason_tmpl": "orchestrator must not invoke target directly via kiro-cli chat <<< (bypassing subagent)"
+    },
+    {
+      "id": "efficiency_judge",
+      "type": "LLMJudge",
+      "severity": "recommended",
+      "dimension": "efficiency",
+      "pass_threshold": 0.75,
+      "reason_tmpl": "efficiency (LLM advisory score, enabled with --llm)"
+    },
+    {
+      "id": "reasoning_judge",
+      "type": "LLMJudge",
+      "severity": "recommended",
+      "dimension": "reasoning_quality",
+      "pass_threshold": 0.75,
+      "reason_tmpl": "reasoning quality (LLM advisory score)"
+    },
+    {
+      "id": "authenticity_judge",
+      "type": "LLMJudge",
+      "severity": "recommended",
+      "dimension": "authenticity",
+      "pass_threshold": 0.75,
+      "reason_tmpl": "authenticity / catch fabrication (LLM advisory score)"
+    }
+  ]
+}

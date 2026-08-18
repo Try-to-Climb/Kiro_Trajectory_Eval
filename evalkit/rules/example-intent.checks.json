@@ -1,0 +1,11 @@
+{
+  "_doc": "Intent-syntax example: no type/regex, use reads/runs/write/dispatches/pipeline/never_* to describe expectations. Equivalent to example-minimal, but easier to write.",
+  "target_agent": "my-agent",
+  "checks": [
+    {"reads": "*README*", "importance": "required", "as": "at least read the README (either read_file or cat counts)"},
+    {"runs": "ls*", "importance": "recommended", "as": "listed a directory"},
+    {"write": "report", "importance": "optional", "as": "(optional) produced a report"},
+    {"never_runs": "rm -rf /", "as": "forbid rm -rf /"},
+    {"pipeline": ["reads README", "runs ls*"], "importance": "recommended", "as": "read then list (example main flow)"}
+  ]
+}
