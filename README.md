@@ -1,6 +1,6 @@
-# kiro-eval — Evaluation toolkit for Kiro CLI agent sessions
+# Kiro_Trajectory_Eval — Evaluation toolkit for Kiro CLI agent sessions
 
-**kiro-eval** turns a Kiro CLI agent run into a structured, auditable evaluation. It reads the session record that Kiro writes to `$KIRO_HOME/sessions/cli/`, normalizes it into a stable action sequence, and judges whether the agent **actually did what it said it did** — matching the run's real behavior against its stated intent, produced artifacts, and user requirements.
+**Kiro_Trajectory_Eval** turns a Kiro CLI agent run into a structured, auditable evaluation. It reads the session record that Kiro writes to `$KIRO_HOME/sessions/cli/`, normalizes it into a stable action sequence, and judges whether the agent **actually did what it said it did** — matching the run's real behavior against its stated intent, produced artifacts, and user requirements.
 
 Two evaluation paths share the same normalization layer:
 
@@ -41,7 +41,7 @@ python3 runner.py <session-id> --no-llm   # deterministic-only, no LLM calls
 ## Repository layout
 
 ```
-kiro-eval/
+Kiro_Trajectory_Eval/
 ├── evalkit/          Declarative-rule evaluator (rules + engine + normalizer + OTel export)
 ├── eval-agent/       Forensic evaluator (9-step pipeline, uses evalkit for normalization)
 ├── hooks/            Optional Kiro CLI hook collector (bash + jq)

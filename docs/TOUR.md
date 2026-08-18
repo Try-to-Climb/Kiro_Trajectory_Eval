@@ -90,7 +90,7 @@
 
 ```bash
 # 1. clone
-git clone <this-repo> kiro-eval && cd kiro-eval
+git clone <this-repo> Kiro_Trajectory_Eval && cd Kiro_Trajectory_Eval
 
 # 2. Python 3.10+, zero deps — run the built-in sample immediately
 cd evalkit

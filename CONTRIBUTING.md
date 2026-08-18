@@ -6,7 +6,7 @@ Thanks for considering a contribution. This project has two evaluator components
 
 ```bash
 git clone <repo>
-cd kiro-eval
+cd Kiro_Trajectory_Eval
 
 # Core is zero third-party deps. Optional viz dep:
 pip install matplotlib

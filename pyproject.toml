@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kiro-eval"
+name = "kiro-trajectory-eval"
 version = "0.1.0"
 description = "Trajectory-level agent evaluation toolkit: declarative rules (evalkit) + forensic pipeline (eval-agent) + optional hook collector."
 readme = "README.md"
