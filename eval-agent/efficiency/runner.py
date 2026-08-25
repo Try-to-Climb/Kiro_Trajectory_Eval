@@ -191,6 +191,19 @@ def cmd_all(args):
     if args.out:
         _dump(report, args.out)
         print(f"[all] final report written to {args.out}")
+        # Alongside the JSON, always emit the human-readable Markdown.
+        # If --out is foo.json it goes to foo.md; if foo it goes to foo.md.
+        import os as _os
+        out_json = args.out
+        stem, ext = _os.path.splitext(out_json)
+        md_path = (stem + ".md") if ext else (out_json + ".md")
+        try:
+            md = steps.render_report_markdown(report, tree)
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(md)
+            print(f"[all] markdown report written to {md_path}")
+        except Exception as e:
+            print(f"[all] markdown render failed: {e!r}")
 
 
 # ---------------------------------------------------------------------------
