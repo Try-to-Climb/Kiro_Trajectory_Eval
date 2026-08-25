@@ -132,9 +132,66 @@ def _child_index(official_dir: str) -> dict[str, list[str]]:
     return idx
 
 
+# ---------------------------------------------------------------------------
+# IR pickle cache
+# ---------------------------------------------------------------------------
+# Normalization takes 3-5 seconds; pickle deserialization takes tens of ms.
+# The same session gets loaded many times across workflows and debug reruns,
+# so caching is a big win. Caches are keyed by include_responses (wr/nr).
+#
+# Invalidation: cache stale when .jsonl mtime > cache mtime -> recompute.
+# Versioning:   directory holds a vN prefix; schema bumps switch to vN+1 and
+#               old caches naturally expire.
+_IR_CACHE_VERSION = "v1"
+_IR_CACHE_ROOT = os.path.expanduser(f"~/.eval-agent/ir_cache/{_IR_CACHE_VERSION}")
+
+
+def _cache_path(sid: str, include_responses: bool) -> str:
+    suffix = "wr" if include_responses else "nr"
+    return os.path.join(_IR_CACHE_ROOT, f"{sid}_{suffix}.pkl")
+
+
+def _load_ir_cached(sid: str, official_dir: str,
+                    include_responses: bool, use_cache: bool):
+    """IR loader with a pickle cache. Falls through to a fresh load when the
+    cache is stale or use_cache is False."""
+    if not use_cache:
+        return load_trace_from_official(sid, official_dir=official_dir,
+                                        include_responses=include_responses)
+
+    cache_p = _cache_path(sid, include_responses)
+    jl_p = os.path.join(official_dir, f"{sid}.jsonl")
+
+    if os.path.isfile(cache_p) and os.path.isfile(jl_p):
+        if os.path.getmtime(cache_p) > os.path.getmtime(jl_p):
+            try:
+                import pickle
+                with open(cache_p, "rb") as f:
+                    return pickle.load(f)
+            except Exception:
+                pass                                # bad cache: silently fall through to recompute
+
+    ir = load_trace_from_official(sid, official_dir=official_dir,
+                                  include_responses=include_responses)
+    if ir is None:
+        return None
+    try:
+        import pickle
+        os.makedirs(_IR_CACHE_ROOT, exist_ok=True)
+        # Write to tmp then rename to avoid truncating an existing cache on
+        # a full disk (partial-write scenario).
+        tmp = cache_p + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(ir, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, cache_p)
+    except Exception:
+        pass                                        # cache write failure must not kill the load
+    return ir
+
+
 def load_run_tree(root_sid: str, official_dir: Optional[str] = None,
                   max_depth: int = 3, include_responses: bool = False,
-                  with_children: bool = True) -> RunTree:
+                  with_children: bool = True, use_cache: bool = True) -> RunTree:
     """Load root_sid and its recursive child sessions, merged into one run tree.
 
     Every action gets two extra fields:
@@ -142,6 +199,10 @@ def load_run_tree(root_sid: str, official_dir: Optional[str] = None,
       ref — "<first 8 of sid>#<idx>", unique across sessions (within a single session
             idx numbers are reused; in practice multiple child sessions have idx=7,
             see DESIGN.md P9).
+
+    use_cache: whether to use the IR pickle cache (default True). Cache location:
+               ~/.eval-agent/ir_cache/v1/. Invalidation rule: .jsonl mtime > cache
+               mtime -> recompute.
     """
     base = official_dir or default_official_dir()
     tree = RunTree(root=root_sid)
@@ -155,8 +216,7 @@ def load_run_tree(root_sid: str, official_dir: Optional[str] = None,
             continue
         seen.add(sid)
         try:
-            ir = load_trace_from_official(sid, official_dir=base,
-                                          include_responses=include_responses)
+            ir = _load_ir_cached(sid, base, include_responses, use_cache)
         except Exception as e:                       # A child session with missing records should not sink the whole tree
             tree.warnings.append(f"session {sid[:8]} failed to load: {e}")
             continue
