@@ -1,9 +1,12 @@
 """LLM call layer: invocation + ANSI stripping + JSON extraction + validation gate + retries.
 
-The backend reuses evalkit's kiro_caller (Kiro-as-LLM, judge agent has no tools) — zero
-new dependencies. Every LLM step's output must pass a validator; on failure we hand the
-errors back to the LLM once, and if it still fails we raise LLMOutputError — no silent
-pass, no silent drop (same principle as evalkit's validation gate).
+The backend is Kiro ACP (``kiro-cli acp``, JSON-RPC over stdio). By default every
+``ask`` starts a short-lived ACP session; when history must be preserved across asks,
+maintain your own ``KiroAcpClient`` and inject it via ``caller=acp_caller_from(client)``.
+
+Every LLM step's output must pass a validator; on failure the errors are handed back
+to the LLM once, and if it still fails we raise LLMOutputError — no silent pass, no
+silent drop (same principle as evalkit's validation gate).
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import time
 from typing import Any, Callable, Optional
 
 import _bootstrap  # noqa: F401
-from trajectory.llm_judge import kiro_caller
+from kiro_acp import KiroAcpClient
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
@@ -75,6 +78,19 @@ def extract_json(text: str) -> Any:
 Validator = Callable[[Any], list[str]]     # Returns a list of errors; empty means pass
 
 
+def _default_acp_caller(agent: str, timeout: int) -> Callable[[str], str]:
+    """One-shot ACP caller: fresh session per prompt.
+
+    Replaces the old ``kiro-cli chat --no-interactive`` route. Semantically
+    identical for callers that only send one prompt per invocation
+    (goal_completion's s2/s3/s4).
+    """
+    def _call(prompt: str) -> str:
+        with KiroAcpClient(agent=agent, timeout=timeout) as c:
+            return c.prompt(prompt)
+    return _call
+
+
 def ask(prompt: str, validate: Optional[Validator] = None, *,
         caller: Optional[Callable[[str], str]] = None,
         agent: str = "kiro-judge", timeout: int = 480,
@@ -87,9 +103,11 @@ def ask(prompt: str, validate: Optional[Validator] = None, *,
       - Backend exception   → retry `backend_retries` times (in practice kiro-cli occasionally
                               panics with exit 101; the same prompt succeeds on retry, so a
                               single failure should not abort)
-    `caller` is injectable (tests stub it out without touching the real backend).
+    `caller` is injectable (tests stub it out without touching the real backend, or pass a
+    caller bound to a long-lived ACP session so multiple asks share one history). The
+    default backend is ACP with a short-lived session per ask.
     """
-    call = caller or (lambda p: kiro_caller(p, agent=agent, timeout=timeout))
+    call = caller or _default_acp_caller(agent, timeout)
     last_errs: list[str] = []
     # Some traces mix binary content with \x00 into prompts, but subprocess argv rejects NULs.
     # Strip control chars here (\x00 and other non-text control codes), keep normal whitespace.
