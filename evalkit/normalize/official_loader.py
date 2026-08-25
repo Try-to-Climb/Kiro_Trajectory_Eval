@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 from .core import _expand_from_tool          # reuse fan-out + semantic mapping
 from .official import default_official_dir, load_official, _content_text
-from .schema import Action, TraceIR
+from .schema import Action, Thinking, TraceIR
 
 
 def _tool_input(tooluse_data: dict) -> dict:
@@ -149,9 +149,14 @@ def load_trace_from_official(session_id: str,
                 _content_text(c) for c in (data.get("content") or [])
                 if c.get("kind") == "thinking")
 
-            for c in (data.get("content") or []):
-                if c.get("kind") != "toolUse":
-                    continue
+            # Collect all toolUse in this message and remember the starting
+            # position (used to back-fill Thinking.action_refs).
+            tool_use_contents = [c for c in (data.get("content") or [])
+                                 if c.get("kind") == "toolUse"]
+            has_tool_use = bool(tool_use_contents)
+            actions_before = len(ir.actions)
+
+            for c in tool_use_contents:
                 td = c.get("data") or {}
                 tool = td.get("name") or "unknown"
                 args = _tool_input(td)
@@ -167,6 +172,7 @@ def load_trace_from_official(session_id: str,
                         command=part.get("command"),
                         subcommands=part.get("subcommands", []),
                         pattern=part.get("pattern"),
+                        purpose=(args.get("__tool_use_purpose") if isinstance(args, dict) else None),
                         reasoning=msg_thinking,
                         completed=True,          # tentative; back-filled below from ToolResults
                         blocked=False,
@@ -175,6 +181,18 @@ def load_trace_from_official(session_id: str,
                     ))
                     idx += 1
                 call_idx += 1
+
+            # Store the thinking unconditionally, independent of toolUse.
+            # This is the patch to IR's "Action-centric" design: without it,
+            # thinking on pure-reply / pure-thinking messages (no toolUse)
+            # would be lost.
+            if msg_thinking:
+                ir.thinkings.append(Thinking(
+                    turn=max(turn, 1),
+                    text=msg_thinking,
+                    has_tool_use=has_tool_use,
+                    action_refs=[a.idx for a in ir.actions[actions_before:]],
+                ))
 
         elif kind == "ToolResults":
             results = data.get("results")

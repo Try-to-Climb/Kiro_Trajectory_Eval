@@ -44,6 +44,7 @@ class Action:
     command: Optional[str] = None       # full command for shell-type actions                             [→ gen_ai.tool.call.arguments]
     subcommands: list[str] = field(default_factory=list)  # subcommands after splitting by && ; || newline
     pattern: Optional[str] = None       # grep/glob pattern; on spawn, the invoked agent's name           [→ arguments or gen_ai.agent.name]
+    purpose: Optional[str] = None       # Short intent from args.__tool_use_purpose (Kiro CLI's built-in call reason)  [→ kiro.tool.purpose]
 
     # ---- reasoning / response ----
     reasoning: str = ""           # agent thinking before this tool call (official thinking; hook source has none) [→ kiro.reasoning]
@@ -77,6 +78,28 @@ class Action:
 
 
 @dataclass
+class Thinking:
+    """A single agent thinking segment.
+
+    Stored as a peer of Action (independent list):
+      - Message with toolUse -> thinking is *also* copied into Action.reasoning
+        for backward compatibility, and recorded here so any consumer can
+        retrieve the full text.
+      - Message without toolUse (pure thinking / pure reply) -> Action.reasoning
+        has nowhere to attach and the thinking would be lost; this list is the
+        only place it lives. Critical signal for efficiency evaluation when
+        judging whether a read was actually consumed by the agent.
+    """
+    turn: int                                   # dialogue turn number
+    text: str                                   # full thinking text
+    has_tool_use: bool                          # whether the same message also had a toolUse
+    action_refs: list[int] = field(default_factory=list)  # Action.idx(es) associated with this thinking, if any
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class TraceIR:
     """The full intermediate representation of a session after normalization."""
 
@@ -86,6 +109,7 @@ class TraceIR:
     prompts: list[str] = field(default_factory=list)      # user input per turn
     responses: list[str] = field(default_factory=list)     # response preview from stop events
     actions: list[Action] = field(default_factory=list)
+    thinkings: list[Thinking] = field(default_factory=list)  # all thinking segments (including those without toolUse)
     warnings: list[str] = field(default_factory=list)      # data issues discovered during parsing
     official: Any = None      # OfficialRecord: Kiro's own session record (optional enrichment)
     run_count: int = 1        # number of agent_spawn events; comes directly from the scan (actions may be empty)
