@@ -1,0 +1,9 @@
+{
+  "name": "graph-page-harness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runs the generated provenance page in a DOM so runtime errors are caught here rather than by the reader opening the file. Test-only: the page itself ships as one self-contained file with no libraries.",
+  "dependencies": {
+    "jsdom": "9.12.0"
+  }
+}

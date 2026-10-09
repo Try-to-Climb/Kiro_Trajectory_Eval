@@ -51,6 +51,10 @@ class Action:
     ref: str = ""                 # "<first 8 chars of sid>#<idx>", unique across sessions
     path: Optional[str] = None    # the specific file this action targets                                  [→ gen_ai.tool.call.arguments]
     root: Optional[str] = None    # search root for search-type actions (grep/glob path lands here)        [→ gen_ai.tool.call.arguments]
+    cwd: Optional[str] = None     # effective working directory for run_command: inline `cd` target >
+                                  # working_dir arg > agent process cwd. The base for resolving relative
+                                  # paths inside a command (unrelated to the session-level cwd in the
+                                  # official record). Consumed by the graph module to build absolute paths.
     command: Optional[str] = None       # full command for shell-type actions                             [→ gen_ai.tool.call.arguments]
     subcommands: list[str] = field(default_factory=list)  # subcommands after splitting by && ; || newline
     pattern: Optional[str] = None       # grep/glob pattern; on spawn, the invoked agent's name           [→ arguments or gen_ai.agent.name]

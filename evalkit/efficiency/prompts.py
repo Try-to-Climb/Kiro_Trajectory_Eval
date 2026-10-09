@@ -245,7 +245,7 @@ either "tool_call" OR "final", never both):
    Read a file from disk (only paths under this run's written_dirs are
    allowed; otherwise returns error). Use to tell "churn vs refinement" on
    files written multiple times.
-   Args: {{"path": "/proj/.../realue.py", "max_bytes": 2000}}
+   Args: {{"path": "/path/to/script.py", "max_bytes": 2000}}
 
 Call shape:
 

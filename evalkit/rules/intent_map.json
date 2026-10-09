@@ -1,23 +1,23 @@
 {
-  "_doc": "意图(reads/runs/write/dispatches)→ 具体动作/命令词 的映射。用户可编辑此文件调整边界。rules_dsl.py 加载它生成规则;文件缺失/损坏时回退内置默认。",
+  "_doc": "Intent -> concrete action/verb mapping used by the structured-intent DSL (reads/runs/write/dispatches). Users may edit this file to adjust boundaries. rules_dsl.py loads it when compiling rules; missing or malformed falls back to built-in defaults.",
 
   "read_actions": ["read_file", "list_dir", "read_image", "search_content", "search_files"],
-  "_read_actions_doc": "归一化后属于\"读\"的语义动作(agent 用 read 工具时的动作)。",
+  "_read_actions_doc": "Semantic actions classified as 'reads' after normalization (what the agent uses the read tool for).",
 
   "read_shell_verbs": ["cat", "bat", "sed", "awk", "grep", "egrep", "rg", "head", "tail", "less", "more", "nl", "wc", "xxd", "od", "jq", "yq"],
-  "_read_shell_verbs_doc": "shell 里视为\"读文件内容\"的命令词(agent 用 shell 读时,run_command 的命令以这些开头/包含)。",
+  "_read_shell_verbs_doc": "Shell verbs treated as 'read file content' (when the agent reads via a shell command, the run_command starts with or contains one of these).",
 
   "read_idioms": ["json\\.load", "\\.read\\(", "\\.readlines\\(", "open\\([^),]*\\)"],
-  "_read_idioms_doc": "更细的\"确定是读\"惯用法正则(用于 python 等):json.load(、.read()、open(单参=读模式)。命令里同时出现这些惯用法与目标文件,就判为读。注意 open('x','w')(带逗号=写模式)不会命中,故不会把写误判成读。",
+  "_read_idioms_doc": "Finer-grained 'definitely a read' idiom regexes (for python etc.): json.load(, .read(), open(single arg = read mode). When a command contains both one of these idioms and the target file, it is judged as a read. Note that open('x','w') (comma = write mode) does not match, so writes are not misclassified as reads.",
 
   "run_action": "run_command",
   "run_prefixes": ["timeout\\s+\\d+\\s+", "sudo\\s+", "env\\s+", "\\w+=\\S+\\s+", "nice\\s+(?:-n\\s+\\d+\\s+)?", "exec\\s+", "stdbuf\\s+\\S+\\s+", "python3?\\s+-m\\s+"],
-  "_run_prefixes_doc": "runs 匹配时,先从子命令开头剥掉的\"前缀词\"正则(它们不是真正被调用的程序):timeout N、sudo、env、KEY=val、nice、exec、python -m 等。剥完看开头是不是目标命令。",
+  "_run_prefixes_doc": "When matching 'runs', these prefix-word regexes are stripped from the subcommand head first (they are not the real program being invoked): timeout N, sudo, env, KEY=val, nice, exec, python -m, etc. After stripping, check whether the head is the target command.",
 
   "write_actions": ["create_file", "modify_file", "append_file"],
   "write_shell_ops": [">>", ">", "tee", "dd"],
-  "_write_shell_ops_doc": "shell 写重定向操作符/命令:>、>>、tee、dd。never_writes 会认这些后面跟目标的写。",
+  "_write_shell_ops_doc": "Shell write redirects/commands: >, >>, tee, dd. never_writes recognises writes where one of these is followed by the target.",
   "write_idioms": ["open\\([^)]*['\"][wa]", "\\.write\\(", "\\.writelines\\(", "json\\.dump\\(", "\\.to_csv\\(", "\\.to_json\\("],
-  "_write_idioms_doc": "确定是写的惯用法(python 等):open(...,'w'/'a')、.write()、json.dump(、.to_csv/.to_json。脚本内部(路径不出现在命令里)的写仍无法捕获。",
+  "_write_idioms_doc": "Definitely-write idioms (python etc.): open(...,'w'/'a'), .write(), json.dump(, .to_csv/.to_json. Writes done entirely inside a script (where the path does not appear in the command) still cannot be captured.",
   "dispatch_action": "spawn_subagent"
 }
