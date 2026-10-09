@@ -393,6 +393,7 @@ def normalize_events(
                 raw_tool=call.tool_raw,
                 tool=canonical_tool(call.tool_raw),
                 action=part["action"],
+                sid=session_id, ref=f"{session_id[:8]}#{idx}",
                 path=_norm_path(part.get("path"), call.pre.get("cwd")),
                 root=_norm_path(part.get("root"), call.pre.get("cwd")),
                 command=part.get("command"),

@@ -45,6 +45,12 @@ def main() -> None:
     ap.add_argument("session", help="session-id (official source) or path to normalized.json")
     ap.add_argument("--rule", help="rule file; if omitted, auto-pick by agent name")
     ap.add_argument("--source", choices=["official", "hook", "both"], default="official")
+    ap.add_argument("--official-dir", default="",
+                    help="directory holding the official session records. "
+                         "Defaults resolve via KIRO_SESSIONS_DIR / "
+                         "$KIRO_HOME/sessions/cli / ~/.kiro/sessions/cli -- "
+                         "inside a Kiro session KIRO_HOME points at the current "
+                         "workspace, unrelated to the session being evaluated")
     ap.add_argument("--archive", action="store_true", help="first archive the whole dispatch tree via pack_run.sh")
     ap.add_argument("--otel", metavar="OUT", help="export OTLP/JSON to this file")
     ap.add_argument("--scoring", help="scoring config (default rules/scoring.json)")
@@ -74,10 +80,16 @@ def main() -> None:
         log.append(f"normalize: read normalized file {args.session}  actions={len(actions)}")
     else:
         if args.source == "official":
-            ir = load_trace_from_official(args.session)
+            ir = load_trace_from_official(args.session,
+                                          official_dir=args.official_dir or None)
         else:
             path = os.path.join(default_trace_dir(), args.session, "trace.jsonl")
             ir = normalize_file(path, enrich=(args.source == "both"))
+        for w in ir.warnings:
+            print(f"[warn] {w}", file=sys.stderr)
+        if not ir.actions:
+            print(f"[warn] source={args.source} read no actions; verdict is meaningless",
+                  file=sys.stderr)
         actions = [a.to_dict() for a in ir.actions]
         agent = ir.agent_name
         objective = (ir.prompts or [""])[0]

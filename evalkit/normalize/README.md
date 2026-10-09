@@ -52,3 +52,48 @@ ir = normalize_file("traces/<sid>/trace.jsonl")   # → TraceIR; ir.actions is t
 | `attribution.py` | Attribute sub-agent activity to the real session in multi-run scenarios |
 | `cli.py` | Command line |
 | `tests/` | Unit tests |
+
+## What to run after changing normalize/
+
+**All three suites must run.** The `Action` fields the normalization layer
+produces are shared by all three upstream features, and a field change usually
+only breaks downstream:
+
+```bash
+cd evalkit
+python3 -m unittest discover                 # all 241 tests across normalize, rule, goal, efficiency
+```
+
+The flags: `-s` is where to look for tests, `-t` is the project root (decides
+whether `from normalize import ...` resolves; must be `evalkit/`).
+
+### Which fields each consumer reads
+
+Check this table before changing a field:
+
+| Feature | `Action` fields consumed | Breakage if the field stops being filled |
+|------|---------------------|-----------|
+| rule | `action` `tool` `command` `path` `root` `pattern` `idx` `completed` `subcommands` | rules **silently miss**, verdicts drift loose |
+| goal | the six serialized fields above + `args.__tool_use_purpose` + `reasoning` | anchor-retrieval recall drops, false MISS appears |
+| efficiency | all of the above + `response` `error` `blocked` + `TraceIR.thinkings` + official turn metadata | s4/s5/s7 directly break |
+
+`response` is only filled when `include_responses=True`, which only efficiency
+sets; `thinkings` is currently consumed only by efficiency (s4's sibling-filter
+depends on it).
+
+### Limitation of the existing tests
+
+The records under `tests/` are all **hand-built in code**
+(`normalize_events([prompt(), pre("execute_bash", {...})])`): they exercise our
+own mapping logic. They do **not catch Kiro's own record-format drift**: if Kiro
+renames a field, `load_trace_from_official` records a warning and returns an
+empty IR (see `test_missing_jsonl_warns`), and all 241 tests still pass.
+
+So after a Kiro upgrade, besides running the tests, also sanity-check a real
+session recorded by the new build:
+
+```bash
+python3 -m normalize.cli table <sid> --official --official-dir <dir of that session>
+```
+
+If the action count is 0, or stderr prints `[warn]`, the format has drifted.

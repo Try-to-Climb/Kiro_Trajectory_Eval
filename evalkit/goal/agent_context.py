@@ -451,7 +451,7 @@ def load_agent_context_or_empty(agent_dir: Optional[str] = None, *,
     Returns (text, meta). An empty text means not enabled or failed to load; the caller
     should fall back to the baseline.
     """
-    agent_dir = agent_dir or os.environ.get("ATP_AGENT_DIR")
+    agent_dir = agent_dir or os.environ.get("KIRO_EVAL_AGENT_DIR")
     meta = {"mode": mode, "dir": agent_dir or "", "chars": 0}
     if not agent_dir or not os.path.isdir(agent_dir):
         if log:
@@ -496,7 +496,7 @@ if __name__ == "__main__":
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("dir", nargs="?", default=os.environ.get("ATP_AGENT_DIR"))
+    p.add_argument("dir", nargs="?", default=os.environ.get("KIRO_EVAL_AGENT_DIR"))
     p.add_argument("--mode", choices=["raw", "code", "llm"], default="raw")
     p.add_argument("--dump-map", metavar="PATH",
                    help="also dump the structured map JSON to PATH (valid for code/llm modes)")

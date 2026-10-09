@@ -54,10 +54,33 @@ def resolve(target: str) -> str:
 
 
 def _load(args):
+    """Load a trace.
+
+    The official source supports `--official-dir` to override the default
+    directory: the default resolves via KIRO_HOME, which inside a Kiro session
+    points at the **current** session's workspace -- unrelated to the session
+    being analysed, so analysing a session elsewhere requires passing the dir
+    explicitly.
+
+    Warnings are echoed to stderr here so every subcommand gets them
+    uniformly: the loader deliberately records a warning and returns an empty
+    IR when the record is missing (see official_loader's
+    test_missing_jsonl_warns); if the command does not print them, the user
+    sees "0 actions, exit 0, no output" and thinks it worked.
+    """
     incl = getattr(args, 'with_responses', False)
     if getattr(args, 'official', False):
-        return load_trace_from_official(args.target, include_responses=incl)
-    return normalize_file(resolve(args.target), include_responses=incl)
+        ir = load_trace_from_official(
+            args.target,
+            official_dir=getattr(args, 'official_dir', None) or None,
+            include_responses=incl)
+    else:
+        ir = normalize_file(resolve(args.target), include_responses=incl)
+    for w in ir.warnings:
+        print(f"[warn] {w}", file=sys.stderr)
+    if not ir.actions:
+        print("[warn] normalization produced 0 actions", file=sys.stderr)
+    return ir
 
 
 def cmd_dump(args) -> None:
@@ -81,10 +104,7 @@ def cmd_table(args) -> None:
             target = a.path or a.pattern or a.root or ""
         flag = "ok" if a.completed else ("blocked" if a.blocked else "NO-RESP")
         print(f"{a.idx:>4} {a.run:>4} {a.turn:>3} {a.ts[11:19]:>9} {a.action:<16} {flag:<5} {target}")
-    if ir.warnings:
-        print("\nwarnings:")
-        for w in ir.warnings:
-            print(f"  - {w}")
+    # warnings are echoed by _load() to stderr; don't duplicate them here
 
 
 def _stats(ir: TraceIR) -> dict:
@@ -239,14 +259,16 @@ def cmd_compare(args) -> None:
     print(viz.compare_sources(real_sid, hook_path))
 
 
-def _load_by_source(target: str, source: str, include_responses: bool = False) -> TraceIR:
+def _load_by_source(target: str, source: str, include_responses: bool = False,
+                    official_dir: str | None = None) -> TraceIR:
     """Load a TraceIR by source:
         hook     — pure hook trace (enrich=False)
         official — pure Kiro official session record
         both     — hook trace enriched with the official record (enrich=True)
     """
     if source == "official":
-        return load_trace_from_official(target, include_responses=include_responses)
+        return load_trace_from_official(target, official_dir=official_dir or None,
+                                        include_responses=include_responses)
     if source == "both":
         return normalize_file(resolve(target), enrich=True, include_responses=include_responses)
     return normalize_file(resolve(target), enrich=False, include_responses=include_responses)
@@ -257,7 +279,12 @@ def cmd_export_otel(args) -> None:
     from .otel_export import to_otlp_json
     src_label = {"hook": "hook", "official": "official", "both": "hook+official"}[args.source]
     ir = _load_by_source(args.target, args.source,
-                         include_responses=getattr(args, "with_responses", False))
+                         include_responses=getattr(args, "with_responses", False),
+                         official_dir=getattr(args, "official_dir", None))
+    for w in ir.warnings:
+        print(f"[warn] {w}", file=sys.stderr)
+    if not ir.actions:
+        print("[warn] normalization produced 0 actions", file=sys.stderr)
     out_json = to_otlp_json(ir, source=src_label, indent=(None if args.compact else 2))
     if args.out:
         open(args.out, "w", encoding="utf-8").write(out_json + "\n")
@@ -277,9 +304,11 @@ def cmd_orchestration(args) -> None:
     override = {}
     for sid in sids:
         if args.official:
-            ir = load_trace_from_official(sid)
+            ir = load_trace_from_official(sid, official_dir=getattr(args, "official_dir", None) or None)
         else:
             ir = normalize_file(resolve(sid))
+        for w in ir.warnings:
+            print(f"[warn] {sid[:8]}: {w}", file=sys.stderr)
         label = f"{ir.agent_name or sid[:8]} ({sid[:8]})"
         lanes.append((label, ir))
         # --fix-status: hook timeline + official success/failure. Actions from
@@ -287,7 +316,7 @@ def cmd_orchestration(args) -> None:
         # yields the same sequence); use the official completed to override
         # the hook's misjudgments.
         if args.fix_status and not args.official:
-            off = load_trace_from_official(sid)
+            off = load_trace_from_official(sid, official_dir=getattr(args, "official_dir", None) or None)
             if off.official and off.official.found and len(off.actions) == len(ir.actions):
                 override[ir.session_id] = {h.idx: o.completed
                                            for h, o in zip(ir.actions, off.actions)}
@@ -316,11 +345,21 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="normalize", description="trace.jsonl normalization")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    _OFFICIAL_DIR_HELP = (
+        "directory holding the official session records. Defaults resolve via "
+        "KIRO_SESSIONS_DIR / $KIRO_HOME/sessions/cli / ~/.kiro/sessions/cli -- note "
+        "that inside a Kiro session KIRO_HOME points at the **current** session's "
+        "workspace, not the session being analysed")
+
+    def _add_official_dir(p):
+        p.add_argument("--official-dir", default="", help=_OFFICIAL_DIR_HELP)
+
     for name, fn in (("dump", cmd_dump), ("stats", cmd_stats), ("table", cmd_table)):
         p = sub.add_parser(name)
         p.add_argument("target", help="session-id / directory / trace.jsonl path")
         p.add_argument("--official", action="store_true",
                        help="read from Kiro official session record instead of hook trace")
+        _add_official_dir(p)
         if name == "dump":
             p.add_argument("--with-responses", action="store_true",
                            help="also normalize full tool responses (default off, may be very large)")
@@ -335,6 +374,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("timeline", help="timeline chart + turn summary")
     p.add_argument("target")
     p.add_argument("--official", action="store_true")
+    _add_official_dir(p)
     p.add_argument("--format", choices=["text", "mermaid", "png"], default="text")
     p.add_argument("--out", default="", help="output file (recommended for mermaid/png)")
     p.add_argument("--no-summary", action="store_true", help="only emit timeline, without turn summary")
@@ -344,6 +384,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("replay", help="restore action sequence into equivalent shell script")
     p.add_argument("target")
     p.add_argument("--official", action="store_true")
+    _add_official_dir(p)
     p.add_argument("--out", default="")
     p.set_defaults(func=cmd_replay)
 
@@ -357,6 +398,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("target", help="session-id / directory / trace.jsonl path")
     p.add_argument("--source", choices=["hook", "official", "both"], default="hook",
                    help="hook=pure hook trace  official=pure Kiro official record  both=hook+official enrichment")
+    _add_official_dir(p)
     p.add_argument("--out", default="", help="output file; prints to stdout if omitted")
     p.add_argument("--compact", action="store_true", help="compact single-line JSON (default indent=2)")
     p.add_argument("--with-responses", action="store_true",
@@ -367,6 +409,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("orchestration", help="cross-session panorama timeline (parent + child agents)")
     p.add_argument("sessions", help="comma-separated session-ids, e.g. parent,child1,child2")
     p.add_argument("--official", action="store_true")
+    _add_official_dir(p)
     p.add_argument("--fix-status", action="store_true",
                    help="use official source success/failure to correct red crosses on hook timeline (recommended)")
     p.add_argument("--format", choices=["text", "png"], default="text")

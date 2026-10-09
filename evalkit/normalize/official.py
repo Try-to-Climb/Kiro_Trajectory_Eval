@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import Counter
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
@@ -37,6 +38,19 @@ def default_official_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".kiro", "sessions", "cli")
 
 
+def _duration_seconds(td: Any) -> Optional[float]:
+    """turn_duration -> seconds. Kiro writes {"secs": N, "nanos": M}.
+
+    Dropping nanos under-counts: measured 21 seconds lost across one 44-turn
+    session.
+    """
+    if isinstance(td, dict):
+        return td.get("secs", 0) + td.get("nanos", 0) / 1e9
+    if isinstance(td, (int, float)):
+        return float(td)
+    return None
+
+
 @dataclass
 class TurnMeta:
     """Per-turn usage and end status from the official record."""
@@ -44,8 +58,10 @@ class TurnMeta:
     turn: int
     tool_uses: Optional[int] = None          # Kiro's count of tool calls in this turn
     request_count: Optional[int] = None
+    cycles: Optional[int] = None             # inner-loop count for this turn; efficiency's only stuck-turn criterion
     end_reason: Optional[str] = None         # UserTurnEnd / ToolUseRejected / ...
-    duration_s: Optional[int] = None
+    duration_s: Optional[float] = None       # turn_duration including nanos. Taking only
+                                              # `secs` accumulates ~21s loss over a 44-turn session.
     credits: Optional[float] = None          # actual billing
     context_pct: Optional[float] = None
     input_tokens: Optional[int] = None
@@ -70,8 +86,24 @@ class OfficialRecord:
     agent_name: Optional[str] = None
     cwd: Optional[str] = None
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None         # last-activity timestamp; (updated_at - created_at) is
+                                             # the wall-clock window efficiency's idle_pct divides by.
     created_reason: Optional[str] = None     # subagent / rewind / ...
+    parent_session_id: Optional[str] = None  # the session that dispatched this one.
+                                             # **The only reliable parent/child criterion.** Do not
+                                             # use `created_reason=='subagent'` -- top-level sessions
+                                             # can also be marked subagent (e.g. launched via
+                                             # ACP/TUI/kiro-cli), so that marker carries no
+                                             # parent/child information; see child_index below.
     title: Optional[str] = None
+    compactions: int = 0                     # count of .jsonl entries with kind=="Compaction".
+                                             # Context compaction means this run was long enough to
+                                             # need trimming; efficiency treats it as one signal.
+                                             # Rare in practice: 3 of 2104 sessions.
+    unknown_kinds: dict = field(default_factory=dict)  # unknown record kind -> count. Normalization
+                                             # only parses Prompt / AssistantMessage / ToolResults;
+                                             # others are counted here (not silently dropped) so a
+                                             # newly introduced Kiro record kind becomes visible.
     turns: list[TurnMeta] = field(default_factory=list)
 
     @property
@@ -133,7 +165,9 @@ def load_official(session_id: str, official_dir: Optional[str] = None) -> Offici
     rec.agent_name = state.get("agent_name")
     rec.cwd = meta.get("cwd")
     rec.created_at = meta.get("created_at")
+    rec.updated_at = meta.get("updated_at")
     rec.created_reason = meta.get("session_created_reason")
+    rec.parent_session_id = meta.get("parent_session_id")
     rec.title = meta.get("title")
 
     tms = (state.get("conversation_metadata") or {}).get("user_turn_metadatas") or []
@@ -145,8 +179,9 @@ def load_official(session_id: str, official_dir: Optional[str] = None) -> Offici
             turn=i,
             tool_uses=tm.get("builtin_tool_uses"),
             request_count=tm.get("total_request_count"),
+            cycles=tm.get("number_of_cycles"),
             end_reason=tm.get("end_reason"),
-            duration_s=(tm.get("turn_duration") or {}).get("secs"),
+            duration_s=_duration_seconds(tm.get("turn_duration")),
             credits=round(sum(v.get("value", 0.0)
                               for v in (tm.get("metering_usage") or [])), 6) or None,
             context_pct=tm.get("context_usage_percentage"),
@@ -177,6 +212,13 @@ def load_official(session_id: str, official_dir: Optional[str] = None) -> Offici
                         results.update(rs)
                     continue
                 if kind != "AssistantMessage":
+                    # Compaction / any future new kind. Count rather than silently drop --
+                    # otherwise a new Kiro record kind would never surface.
+                    if kind == "Compaction":
+                        rec.compactions += 1
+                    elif kind != "Prompt":
+                        rec.unknown_kinds[str(kind)] = \
+                            rec.unknown_kinds.get(str(kind), 0) + 1
                     continue
                 t = mid2turn.get(data.get("message_id"))
                 if t is None or t > len(rec.turns):
@@ -289,3 +331,75 @@ def cross_check(official: OfficialRecord,
         msg += f" in hook but not official={dict(extra)}"
     out.append(msg)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Parent/child index
+# ---------------------------------------------------------------------------
+# Reading parent/child relations is "understanding the record format", so it
+# belongs here. It answers **only what the relations are** -- how to traverse
+# them, how deep, and what to do when a session fails to load are the
+# consumer's policy decisions.
+#
+# The sole criterion is `parent_session_id`. **Do not use
+# `session_created_reason == "subagent"`** to identify children: in one
+# directory 21 of 71 records carry that marker, but 16 of them have a title
+# that is the user's own question and a non-null agent_name -- those are
+# top-level sessions, not dispatched children. The five genuinely dispatched
+# ones have titles shaped like "You are the <role>-agent. Resolv..." (the
+# parent's task description for the child), a null agent_name,
+# and all of them do carry parent_session_id. The clearest counter-example is
+# 5cf54598: it is itself marked subagent, yet it is precisely the parent of
+# those five children.
+#
+# Unverified: parent_session_id shows up in records from around 2026-07-14
+# onwards; whether any real dispatch happened before that (i.e. whether the
+# field has a historical blind spot) has not been checked. Checking it needs a
+# different criterion -- looking for suspected children by title prefix or by a
+# null agent_name.
+
+_PARENT_RE = re.compile(r'"parent_session_id"\s*:\s*"([0-9a-fA-F-]{36})"')
+_HEAD_BYTES = 4096          # parent_session_id is a top-level meta field, lives at the file head
+
+
+def read_parent(meta_path: str) -> Optional[str]:
+    """Read parent_session_id out of an official-record .json.
+
+    Reads the first 4KB and regex-matches first (meta files can be hundreds of
+    KB and the key sits at the top level); only falls back to a full json
+    parse when the key is not even present in the head.
+    """
+    try:
+        with open(meta_path, "r", encoding="utf-8", errors="replace") as f:
+            head = f.read(_HEAD_BYTES)
+    except OSError:
+        return None
+    m = _PARENT_RE.search(head)
+    if m:
+        return m.group(1)
+    if '"parent_session_id"' not in head:
+        try:
+            with open(meta_path, encoding="utf-8") as fh:
+                return json.load(fh).get("parent_session_id")
+        except (OSError, json.JSONDecodeError):
+            return None
+    return None
+
+
+def child_index(official_dir: Optional[str] = None) -> dict[str, list[str]]:
+    """Scan an official-record directory and build parent -> [children].
+
+    Returned child lists are **not sorted**; callers that need a stable order
+    should sort themselves.
+    """
+    base = official_dir or default_official_dir()
+    idx: dict[str, list[str]] = {}
+    if not os.path.isdir(base):
+        return idx
+    for name in os.listdir(base):
+        if not name.endswith(".json") or name.endswith(".jsonl"):
+            continue
+        parent = read_parent(os.path.join(base, name))
+        if parent:
+            idx.setdefault(parent, []).append(name[:-5])
+    return idx

@@ -240,7 +240,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                    help="retrieval scoring: idf weights by anchor rarity (default), count just tallies hits")
     p.add_argument("--max-llm", type=int, default=8)
     p.add_argument("--agent-dir", help="agent-under-test directory (with prompt.md + .kiro/skills) - "
-                                       "injected into s2/s3 prompts so extraction better fits the agent's capabilities")
+                                       "injected into s2/s3 prompts so extraction better fits the agent's capabilities. "
+                                       "Falls back to the KIRO_EVAL_AGENT_DIR env var when not given")
     p.add_argument("--agent-mode", choices=["raw", "code", "llm"], default="raw",
                    help="agent context extraction mode: raw=raw concatenation / code=pure code structured / "
                         "llm=Kiro produces the structured map (disk-cached)")

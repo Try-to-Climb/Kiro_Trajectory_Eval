@@ -9,18 +9,18 @@ false MISS on the most important requirements. See DESIGN.md P7.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from normalize.official import default_official_dir
+from normalize.official import child_index as normalize_child_index
 from normalize.official_loader import load_trace_from_official
 
-_PARENT_RE = re.compile(r'"parent_session_id"\s*:\s*"([0-9a-fA-F-]{36})"')
-_HEAD_BYTES = 4096          # parent_session_id is a top-level meta field, appears at the start of the file
+_HEAD_BYTES = 4096          # kept for session_time_window's meta-head reads
 
 
 @dataclass
@@ -99,36 +99,18 @@ def session_time_window(sid: str, official_dir: str
     return lo, hi
 
 
-def _read_parent(meta_path: str) -> Optional[str]:
-    try:
-        with open(meta_path, "r", encoding="utf-8", errors="replace") as f:
-            head = f.read(_HEAD_BYTES)
-    except OSError:
-        return None
-    m = _PARENT_RE.search(head)
-    if m:
-        return m.group(1)
-    if '"parent_session_id"' not in head:      # Not in the header — fall back to full parse
-        try:
-            return json.load(open(meta_path, encoding="utf-8")).get("parent_session_id")
-        except (OSError, json.JSONDecodeError):
-            return None
-    return None
-
-
 def _child_index(official_dir: str) -> dict[str, list[str]]:
-    """Sweep the official records directory once and build parent -> [children] index."""
-    idx: dict[str, list[str]] = {}
-    if not os.path.isdir(official_dir):
-        return idx
-    for name in os.listdir(official_dir):
-        if not name.endswith(".json") or name.endswith(".jsonl"):
-            continue
-        sid = name[:-5]
-        parent = _read_parent(os.path.join(official_dir, name))
-        if parent:
-            idx.setdefault(parent, []).append(sid)
-    return idx
+    """parent -> [children] index.
+
+    Parsing the parent/child relation is record-format knowledge and has moved
+    into the normalization layer (normalize.official.child_index). This stays
+    as a thin delegation so callers of _child_index don't have to change.
+
+    The criterion is `parent_session_id`; **do not** use
+    `created_reason=='subagent'` (top-level sessions can also be marked
+    subagent). See the comment on normalize.official.child_index for details.
+    """
+    return normalize_child_index(official_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +121,35 @@ def _child_index(official_dir: str) -> dict[str, list[str]]:
 # so caching is a big win. Caches are keyed by include_responses (wr/nr).
 #
 # Invalidation: cache stale when .jsonl mtime > cache mtime -> recompute.
-# Versioning:   directory holds a vN prefix; schema bumps switch to vN+1 and
-#               old caches naturally expire.
-_IR_CACHE_VERSION = "v1"
-_IR_CACHE_ROOT = os.path.expanduser(f"~/.eval-agent/ir_cache/{_IR_CACHE_VERSION}")
+# Versioning:   the cache directory name embeds a hash of the pickled dataclass
+#               field names *and types*, so adding a field to Action / TurnMeta /
+#               OfficialRecord automatically lands in a fresh directory. This
+#               replaces a hand-bumped vN: relying on someone remembering to
+#               bump it already produced wrong numbers once -- stale caches held
+#               OfficialRecords predating `cycles` / `updated_at`, so
+#               efficiency's s1 reported cycles=0 and wall_s=0.
+_IR_CACHE_VERSION = "v2"
+
+
+def _schema_fingerprint() -> str:
+    """8-hex digest over the field names and types of the pickled dataclasses.
+
+    Types matter, not just names: TurnMeta.duration_s went from int (secs only)
+    to float (secs + nanos) without renaming, and a name-only digest let stale
+    caches survive, so net_s stayed seconds short.
+    """
+    import hashlib
+    from normalize.schema import Action, Thinking, TraceIR
+    from normalize.official import OfficialRecord, TurnMeta
+    parts = []
+    for cls in (Action, Thinking, TraceIR, OfficialRecord, TurnMeta):
+        names = ",".join(f"{f.name}:{f.type}" for f in dataclasses.fields(cls))
+        parts.append(f"{cls.__name__}({names})")
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:8]
+
+
+_IR_CACHE_ROOT = os.path.expanduser(
+    f"~/.eval-agent/ir_cache/{_IR_CACHE_VERSION}-{_schema_fingerprint()}")
 
 
 def _cache_path(sid: str, include_responses: bool) -> str:
@@ -230,8 +237,13 @@ def load_run_tree(root_sid: str, official_dir: Optional[str] = None,
         tree.nodes[sid] = node
         for a in ir.actions:
             d = a.to_dict()
-            d["sid"] = sid
-            d["ref"] = f"{sid[:8]}#{d['idx']}"
+            # sid / ref are filled by the normalization layer (Action.sid /
+            # Action.ref). This fallback only exists for old IR pickles cached
+            # before those fields were added -- they deserialize without them.
+            if not d.get("sid"):
+                d["sid"] = sid
+            if not d.get("ref"):
+                d["ref"] = f"{sid[:8]}#{d['idx']}"
             d["depth"] = depth
             tree.actions.append(d)
         for kid in sorted(kids.get(sid, [])):

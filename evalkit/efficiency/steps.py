@@ -38,26 +38,27 @@ from .schema import (
 # ============================================================================
 # s1 · map
 # ============================================================================
-def _to_seconds(td: Any) -> float:
-    if isinstance(td, dict):
-        return td.get("secs", 0) + td.get("nanos", 0) / 1e9
-    return td or 0
+def _parse_iso(s: Optional[str]):
+    if not s:
+        return None
+    try:
+        return dt.datetime.fromisoformat(
+            s.replace("Z", "+00:00").split(".")[0] + "+00:00")
+    except ValueError:
+        return None
 
 
-def _count_compactions(jsonl_path: str) -> int:
-    """Scan the .jsonl and count Compaction events."""
-    if not os.path.isfile(jsonl_path):
-        return 0
-    n = 0
-    with open(jsonl_path, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            if '"kind":"Compaction"' in line:
-                n += 1
-    return n
+def s1_map(tree: RunTree) -> dict[str, Any]:
+    """Snapshot turn metadata and global totals from the normalized record.
 
+    Reads evalkit's OfficialRecord (tree.root_node.ir.official) rather than
+    re-parsing the raw .json. Every field below is already parsed there --
+    duration / credits / cycles / request_count / context_pct / end_reason /
+    prompt_len, plus created_at / updated_at for the wall-clock window and
+    `compactions` counted during the .jsonl pass.
 
-def s1_map(sid: str, official_dir: str) -> dict[str, Any]:
-    """Extract turn_metadata, global totals, and Compaction count from raw .json.
+    The returned dict shape is unchanged, so every downstream consumer of
+    overview["turn_metadata"] / overview["totals"] keeps working.
 
     Returns::
 
@@ -69,71 +70,41 @@ def s1_map(sid: str, official_dir: str) -> dict[str, Any]:
           "totals":        dict,         # global summary
         }
     """
-    json_p = os.path.join(official_dir, f"{sid}.json")
-    if not os.path.isfile(json_p):
-        raise FileNotFoundError(f"session json not found: {json_p}")
+    node = tree.root_node
+    off = node.ir.official
+    if off is None or not off.found:
+        raise FileNotFoundError(
+            f"session {tree.root} has no usable official record "
+            "(turn metadata is unavailable)")
 
-    with open(json_p, encoding="utf-8") as f:
-        d = json.load(f)
+    tm: list[dict] = [{
+        "turn":       t.turn,
+        "dur_s":      float(t.duration_s or 0),
+        "credits":    t.credits or 0.0,
+        "cycles":     t.cycles or 0,
+        "llm_reqs":   t.request_count or 0,
+        "ctx_pct":    t.context_pct or 0.0,
+        "end_reason": t.end_reason,
+        "prompt_len": t.prompt_len or 0,
+    } for t in off.turns]
 
-    utm = (d.get("session_state") or {}) \
-        .get("conversation_metadata", {}) \
-        .get("user_turn_metadatas", []) or []
-
-    tm: list[dict] = []
-    for i, u in enumerate(utm):
-        metering = u.get("metering_usage") or []
-        credits = (sum(m.get("value", 0) for m in metering)
-                   if isinstance(metering, list) else 0)
-        tm.append({
-            "turn":       i + 1,
-            "dur_s":      _to_seconds(u.get("turn_duration")),
-            "credits":    credits,
-            "cycles":     u.get("number_of_cycles") or 0,
-            "llm_reqs":   u.get("total_request_count") or 0,
-            "ctx_pct":    u.get("context_usage_percentage") or 0.0,
-            "end_reason": u.get("end_reason"),
-            "end_ts":     u.get("end_timestamp"),
-            "prompt_len": u.get("user_prompt_length") or 0,
-        })
-
-    # wall-clock window
-    lo = hi = None
-    c_at, u_at = d.get("created_at"), d.get("updated_at")
-    if c_at:
-        try:
-            lo = dt.datetime.fromisoformat(
-                c_at.replace("Z", "+00:00").split(".")[0] + "+00:00")
-        except ValueError:
-            pass
-    if u_at:
-        try:
-            hi = dt.datetime.fromisoformat(
-                u_at.replace("Z", "+00:00").split(".")[0] + "+00:00")
-        except ValueError:
-            pass
+    lo, hi = _parse_iso(off.created_at), _parse_iso(off.updated_at)
     wall_s = (hi - lo).total_seconds() if (lo and hi) else None
 
-    # global totals
     total_dur = sum(r["dur_s"] for r in tm)
-    total_credits = sum(r["credits"] for r in tm)
-    total_reqs = sum(r["llm_reqs"] for r in tm)
-    total_cycles = sum(r["cycles"] for r in tm)
-    n_compactions = _count_compactions(os.path.join(official_dir, f"{sid}.jsonl"))
-
     totals = {
         "wall_s":      wall_s,
         "net_s":       total_dur,
-        "credits":     total_credits,
-        "llm_reqs":    total_reqs,
-        "cycles":      total_cycles,
-        "compactions": n_compactions,
+        "credits":     sum(r["credits"] for r in tm),
+        "llm_reqs":    sum(r["llm_reqs"] for r in tm),
+        "cycles":      sum(r["cycles"] for r in tm),
+        "compactions": off.compactions,
     }
     if wall_s and wall_s > 0:
         totals["idle_pct"] = round((1 - total_dur / wall_s) * 100, 1)
 
     return {
-        "sid":           sid,
+        "sid":           tree.root,
         "turns":         len(tm),
         "wall_window":   [lo.isoformat() if lo else None,
                           hi.isoformat() if hi else None],

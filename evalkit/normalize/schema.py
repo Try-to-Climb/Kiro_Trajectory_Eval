@@ -39,6 +39,16 @@ class Action:
 
     # ---- semantic ----
     action: str                   # semantic action, e.g. read_file / modify_file                          [→ kiro.action; drives operation.name]
+
+    # ---- provenance ----
+    # idx is only unique within one session -- merging across sessions collides
+    # (observed: several child sessions each have idx=7). Once an Action goes
+    # through to_dict() it loses its provenance, and all three consumers pass
+    # bare dicts around, so provenance must live on a field, not a @property.
+    # ref is the single source of goal's evidence-bank references, judge-output
+    # validation, and efficiency reports' `<sid8>#<idx>` identifiers.
+    sid: str = ""                 # owning session id
+    ref: str = ""                 # "<first 8 chars of sid>#<idx>", unique across sessions
     path: Optional[str] = None    # the specific file this action targets                                  [→ gen_ai.tool.call.arguments]
     root: Optional[str] = None    # search root for search-type actions (grep/glob path lands here)        [→ gen_ai.tool.call.arguments]
     command: Optional[str] = None       # full command for shell-type actions                             [→ gen_ai.tool.call.arguments]

@@ -68,7 +68,7 @@ def _get_segments(args, tree):
 # Per-step command handlers
 # ---------------------------------------------------------------------------
 def cmd_s1(args):
-    ov = steps.s1_map(args.session, args.official_dir)
+    ov = steps.s1_map(_get_tree(args))
     t = ov["totals"]
     print(f"[s1] turns={ov['turns']}")
     print(f"     wall_s={t.get('wall_s') or 0:.0f}  net_s={t['net_s']:.0f}")
@@ -116,8 +116,8 @@ def cmd_s6(args):
 
 
 def cmd_s7(args):
-    ov = steps.s1_map(args.session, args.official_dir)
     tree = _get_tree(args)
+    ov = steps.s1_map(tree)
     segs = _get_segments(args, tree)
     stuck = steps.s7_detect_stuck(ov, tree, segs)
     for seg_id, r in stuck.items():
@@ -133,10 +133,9 @@ def cmd_s7(args):
 def cmd_all(args):
     use_llm = not args.no_llm
 
-    ov = steps.s1_map(args.session, args.official_dir)
-    print(f"[s1] turns={ov['turns']} credits={ov['totals']['credits']:.1f}")
-
     tree = _get_tree(args)
+    ov = steps.s1_map(tree)
+    print(f"[s1] turns={ov['turns']} credits={ov['totals']['credits']:.1f}")
 
     if args.segments:
         segs = _load_segments_file(args.segments)

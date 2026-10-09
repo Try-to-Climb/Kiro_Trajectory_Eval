@@ -189,7 +189,7 @@ Evidence pack:
 
 Note: the [2. Per-segment cost] table lists each segment's human-readable
 `theme`. When writing `reason` and `suspicious_ops`, mention the theme
-(e.g. "moshell UE probe" segment) rather than only the numeric seg id --
+(e.g. "db-connection probe" segment) rather than only the numeric seg id --
 the seg id alone is not meaningful to end-user readers.
 
 ============================================================
@@ -264,8 +264,8 @@ Final judgment shape:
     {{"seg": 1, "grade": "A|B|C|D", "reason": "20-80 chars",
       "suspicious_ops": [
         "0..6 items. Each item is a DETAILED, self-contained audit note (target length 200-500 characters, in the same language as the user's prompts in the trace) that the end user will read WITHOUT access to the raw trace. REQUIRED CONTENT per item, in this order:",
-        "  (1) WHERE: name the segment by its human theme (e.g. 'In the moshell UE-probe segment' / 'During the login-Control-PC UE-status-check phase'). DO NOT write 'seg 1' or 'segment 3' in the content — the seg id is metadata, not user-facing text. Also mention the turn number(s).",
-        "  (2) WHAT: describe the operation in plain language -- name the command / tool / file / API / endpoint in words, not just refs. Example good phrasings: 'moshell ue print probing, rewrote the script as /tmp/ue.mos -> ue2.mos -> ue3.mos to try 3 flag combinations', 'ERIS REST API /params endpoint queried via inline python3 heredoc'. Refs go in parentheses ONLY for traceability, never as the item's headline.",
+        "  (1) WHERE: name the segment by its human theme (e.g. 'In the db-connection probe segment' / 'During the login-controller status-check phase'). DO NOT write 'seg 1' or 'segment 3' in the content — the seg id is metadata, not user-facing text. Also mention the turn number(s).",
+        "  (2) WHAT: describe the operation in plain language -- name the command / tool / file / API / endpoint in words, not just refs. Example good phrasings: 'db status probing, rewrote the script as /tmp/probe.sh -> probe2.sh -> probe3.sh to try 3 flag combinations', 'admin REST API /params endpoint queried via inline python3 heredoc'. Refs go in parentheses ONLY for traceability, never as the item's headline.",
         "  (3) WHY IT'S SUSPICIOUS: cite concrete evidence -- similarity score, repeat count, cycle count, credits, error strings from response text, single-turn density, or share-of-total. Include at least two numeric data points per item where possible.",
         "  (4) DECISIVE DETAIL FROM INVESTIGATION: whenever you inspected an action's full body / response / turn / file via tool calls, quote or paraphrase the specific detail that made it suspicious (e.g. 'response body was JSONDecodeError for /params calls #14/#21 — retries were papering over an endpoint typo', 'trace.py grew from 24 to 189 lines across 4 in-turn writes with the last diff only fixing an indent'). Do NOT restate what is already in the pack unless you added detail from a tool call.",
         "May be empty [] if the segment has nothing worth flagging (typical for A-grade segments)."

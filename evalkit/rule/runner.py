@@ -121,6 +121,23 @@ def main() -> None:
     ap.add_argument("checks")
     ap.add_argument("normalized", nargs="?")
     ap.add_argument("--session")
+    ap.add_argument("--official", action="store_true",
+                    help="explicitly opt in to the Kiro official session record. "
+                         "The official source is already the default; this flag "
+                         "exists for compatibility with existing docs and scripts")
+    ap.add_argument("--hook", action="store_true",
+                    help="fall back to hook trace.jsonl instead of the Kiro "
+                         "official session record. The default is official -- "
+                         "its `completed` is backfilled from ToolResults, which "
+                         "is more accurate than inferring from hook pre/post "
+                         "pairing")
+    ap.add_argument("--official-dir", default="",
+                    help="directory holding the official session records. "
+                         "Defaults resolve via KIRO_SESSIONS_DIR / "
+                         "$KIRO_HOME/sessions/cli / ~/.kiro/sessions/cli -- note "
+                         "that inside a Kiro session KIRO_HOME points at the "
+                         "**current** session's workspace, not the session being "
+                         "evaluated")
     ap.add_argument("--json", action="store_true", help="output JSON")
     ap.add_argument("--scoring", help="scoring config file (default rules/scoring.json)")
     ap.add_argument("--llm", action="store_true",
@@ -162,8 +179,32 @@ def main() -> None:
 
     objective = ""
     if args.session:
-        from normalize import normalize_file, default_trace_dir
-        ir = normalize_file(os.path.join(default_trace_dir(), args.session, "trace.jsonl"))
+        # Official source is the default. Rule only consumes nine fields
+        # (action / tool / command / path / root / pattern / idx / completed /
+        # subcommands); the official source fills all of them, and `completed`
+        # is backfilled from ToolResults by toolUseId -- more accurate than
+        # inferring from the hook side's pre/post pairing. The three fields
+        # the official source cannot fill (ts / run / blocked) are not read by
+        # rule at all.
+        if args.hook:
+            if args.official:
+                ap.error("--hook and --official are mutually exclusive")
+            from normalize import default_trace_dir, normalize_file
+            ir = normalize_file(os.path.join(default_trace_dir(), args.session,
+                                             "trace.jsonl"))
+        else:
+            from normalize import load_trace_from_official
+            ir = load_trace_from_official(
+                args.session, official_dir=args.official_dir or None)
+        # When the record is missing the loader records a warning and returns
+        # an empty IR (does not raise). Without echoing them the user would
+        # see "0 actions + a verdict" and think it worked.
+        for w in ir.warnings:
+            print(f"[warn] {w}", file=sys.stderr)
+        if not ir.actions:
+            src = "hook trace" if args.hook else "the official record"
+            print(f"[warn] no actions read from {src}; the verdict is meaningless",
+                  file=sys.stderr)
         actions = [a.to_dict() for a in ir.actions]
         objective = (ir.prompts or [""])[0]
     elif args.normalized:

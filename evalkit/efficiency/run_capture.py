@@ -52,13 +52,12 @@ def run(sid: str, official_dir: str, out_root: Path) -> None:
 
     # ---- s1
     print("[s1] map ...")
-    ov = steps.s1_map(sid, official_dir)
-    _dump(ov, out_dir / "s1_overview.json")
-
-    # tree for s2..s7
+    # tree for s2..s7 (also needed by s1 for turn metadata)
     tree = load_run_tree(sid, official_dir=official_dir,
                          with_children=False, include_responses=True,
                          use_cache=True)
+    ov = steps.s1_map(tree)
+    _dump(ov, out_dir / "s1_overview.json")
 
     # ---- s2 (LLM)
     print("[s2] segment ...")
