@@ -2,7 +2,7 @@
 
 `agent-eval.checks.json` is the trajectory rule file for the **subject agent-eval**. agent-eval is an evaluation orchestrator; its workflow is: `gate → dispatch → wait → read → aggregate → report`.
 
-> This is one of evalkit's **subject rule files**, not part of the evalkit engine. The engine (`../trajectory/`) is unrelated to this file — swap the subject, swap the rule file.
+> This is one of evalkit's **subject rule files**, not part of the evalkit engine. The engine (`../rule/`) is unrelated to this file — swap the subject, swap the rule file.
 
 ## Checkpoints (currently 13)
 

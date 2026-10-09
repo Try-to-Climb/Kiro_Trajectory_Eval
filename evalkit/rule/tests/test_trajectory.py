@@ -1,12 +1,12 @@
 """trajectory checker + runner unit tests.
-Run: python3 -m unittest trajectory.tests.test_trajectory -v
+Run: python3 -m unittest rule.tests.test_trajectory -v
 """
 from __future__ import annotations
 
 import unittest
 
-from trajectory.checkers import match, run_check
-from trajectory.runner import verdict
+from rule.checkers import match, run_check
+from rule.runner import verdict
 
 
 def A(idx, action, **kw):
@@ -127,7 +127,7 @@ class TestBeforeMilestoneIfThen(unittest.TestCase):
 
 class TestVerdict(unittest.TestCase):
     def _r(self, sev, passed):
-        from trajectory.checkers import CheckResult
+        from rule.checkers import CheckResult
         return CheckResult("c", "t", sev, passed, 1.0 if passed else 0.0, "")
 
     def test_pass(self):

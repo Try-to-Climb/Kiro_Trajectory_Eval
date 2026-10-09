@@ -35,7 +35,7 @@
                 ▼                         ▼
        ┌─────────────────┐       ┌─────────────────┐
        │ evalkit/         │       │ eval-agent/     │
-       │ trajectory/      │       │ 9-step pipeline │
+       │ rule/      │       │ 9-step pipeline │
        │ rule matching    │       │ user reqs → evidence │
        └────────┬────────┘       └────────┬────────┘
                 │                         │
@@ -71,7 +71,7 @@
 
 **Want to add a new checker or a new direction**:
 1. `CONTRIBUTING.md`
-2. `evalkit/trajectory/README.md` (implementation of the current 7 checkers)
+2. `evalkit/rule/README.md` (implementation of the current 7 checkers)
 3. `eval-agent/directions/README.md` (direction concept + how to add one)
 
 **Want to install the hook collector**:
@@ -94,12 +94,12 @@ git clone <this-repo> Kiro_Trajectory_Eval && cd Kiro_Trajectory_Eval
 
 # 2. Python 3.10+, zero deps — run the built-in sample immediately
 cd evalkit
-python3 -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
+python3 -m rule.runner rules/example-minimal.checks.json examples/sample.normalized.json
 # expected: PASS  health=1.0
 
 # 3. Run the unit tests to confirm your environment is OK
 python3 -m unittest discover -s normalize/tests -t .            # 117 tests
-python3 -m unittest discover -s trajectory/tests -t .           # 65 tests
+python3 -m unittest discover -s rule/tests -t .           # 65 tests
 cd ../eval-agent && python3 -m unittest discover -s tests -t .  # 59 tests
 
 # 4. Grab one of your own Kiro session IDs and evaluate it
@@ -107,7 +107,7 @@ cd ../eval-agent && python3 -m unittest discover -s tests -t .  # 59 tests
 cd ../evalkit
 python3 -m normalize.cli table <session-id> --source official
 # Pick a rule (or copy rules/example-minimal and edit)
-python3 -m trajectory.runner rules/example-minimal.checks.json --session <session-id> --official
+python3 -m rule.runner rules/example-minimal.checks.json --session <session-id> --official
 
 # 5. (optional) Install the hook collector to trace future Kiro runs:
 cd ..

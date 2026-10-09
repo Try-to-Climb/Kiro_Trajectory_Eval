@@ -38,4 +38,4 @@ EOF
 )"
 
 echo "── Generation complete; running self-check (should print OK) ──"
-python3 -m trajectory.runner "$OUT" --compile
+python3 -m rule.runner "$OUT" --compile

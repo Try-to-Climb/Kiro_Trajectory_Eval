@@ -15,7 +15,7 @@ Initial public release.
 - Normalization layer supporting two data sources (hook trace + Kiro official session records), producing an isomorphic `TraceIR` action sequence per source.
 - Trajectory engine with 7 built-in checkers: `Exists`, `Count`, `Forbidden`, `Before`, `Milestone`, `IfThen`, `Produces`; plus optional `LLMJudge`.
 - Intent-driven rule DSL (`reads` / `runs` / `write` / `dispatches` / `pipeline` / `before` / `never_*` / `if_claims…then_runs` / `judge`) that compiles to the low-level checker syntax. See `rules/AUTHORING.md`.
-- Rule self-check via `python3 -m trajectory.runner <rule>.checks.json --compile`; distinct exit codes for unknown intents, validation errors, and parse failures.
+- Rule self-check via `python3 -m rule.runner <rule>.checks.json --compile`; distinct exit codes for unknown intents, validation errors, and parse failures.
 - OpenTelemetry OTLP/JSON export aligned with OTel GenAI semantic conventions. See `OTEL_MAPPING.md`.
 - One-shot pipeline (`pipeline.py`): archive → normalize → auto-select rule → evaluate → optional OTLP / LLM judge.
 - Rule generator scaffold (`rules/generate-rule.sh`) that produces a starter rule from an agent config (requires `kiro-cli`).

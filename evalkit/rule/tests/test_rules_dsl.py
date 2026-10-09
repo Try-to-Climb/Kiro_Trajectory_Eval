@@ -4,9 +4,9 @@ import os
 import tempfile
 import unittest
 
-from trajectory.rules_dsl import desugar_check, glob_to_regex
-from trajectory.runner import run
-from trajectory.checkers import run_check
+from rule.rules_dsl import desugar_check, glob_to_regex
+from rule.runner import run
+from rule.checkers import run_check
 
 
 class TestGlob(unittest.TestCase):
@@ -78,7 +78,7 @@ class TestDesugar(unittest.TestCase):
         self.assertIn("exclude", d)
 
     def test_never_writes_covers_tool_shell_python(self):
-        from trajectory.checkers import run_check
+        from rule.checkers import run_check
         from normalize.mapping import split_subcommands
         cp = desugar_check({"never_writes": "secret.json"})
         self.assertEqual(cp["severity"], "forbidden")
@@ -145,11 +145,11 @@ class TestEndToEnd(unittest.TestCase):
 
 class TestReadsPrecisionVsTouches(unittest.TestCase):
     """reads only matches real reads (excludes write/delete/mention); touches matches any occurrence."""
-    from trajectory.checkers import match as _m
+    from rule.checkers import match as _m
 
     def _match(self, intent, action):
-        from trajectory.rules_dsl import desugar_check
-        from trajectory.checkers import match
+        from rule.rules_dsl import desugar_check
+        from rule.checkers import match
         return match(action, desugar_check(intent)["match"])
 
     def test_reads_hits_real_read(self):
@@ -185,8 +185,8 @@ class TestReadsPrecisionVsTouches(unittest.TestCase):
 class TestRunsProgram(unittest.TestCase):
     """runs matches at subcommand head (strip prefixes); excludes mentions/substrings."""
     def _match(self, intent, cmd):
-        from trajectory.rules_dsl import desugar_check
-        from trajectory.checkers import match
+        from rule.rules_dsl import desugar_check
+        from rule.checkers import match
         from normalize.mapping import split_subcommands
         a = {"action": "run_command", "command": cmd, "subcommands": split_subcommands(cmd)}
         return match(a, desugar_check(intent)["match"])
@@ -207,7 +207,7 @@ class TestRunsProgram(unittest.TestCase):
 
 class TestIntentMapEditable(unittest.TestCase):
     def test_map_has_read_sets(self):
-        from trajectory.rules_dsl import load_intent_map
+        from rule.rules_dsl import load_intent_map
         m = load_intent_map()
         self.assertIn("cat", m["read_shell_verbs"])
         self.assertIn("read_file", m["read_actions"])
@@ -215,8 +215,8 @@ class TestIntentMapEditable(unittest.TestCase):
     def test_custom_verb_via_map(self):
         # User adds python3 into the mapping -> reads now recognizes python-based reads
         import tempfile, os, json
-        from trajectory.rules_dsl import load_intent_map, reads_regex, _map
-        import trajectory.rules_dsl as dsl
+        from rule.rules_dsl import load_intent_map, reads_regex, _map
+        import rule.rules_dsl as dsl
         d = tempfile.mkdtemp(); p = os.path.join(d, "m.json")
         json.dump({"read_shell_verbs": ["python3"]}, open(p, "w"))
         m = load_intent_map(p)

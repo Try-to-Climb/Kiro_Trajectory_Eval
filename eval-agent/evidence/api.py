@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from . import loader  # noqa: F401  (triggers sys.path bootstrap)
 from .loader import RunTree
-from trajectory.checkers import _serialize, match   # Reuse evalkit, do not fork
+from rule.checkers import _serialize, match   # Reuse evalkit, do not fork
 
 # Full set of action names supported by normalization (static constant, session-agnostic).
 # The criteria must be able to describe "an action that did NOT happen this run", otherwise

@@ -4,16 +4,16 @@ For LLMs/agents working in this repo. Precise, structured, directly actionable. 
 
 ## 0. One-Line Model
 
-`raw records --normalize--> actions[] --trajectory.runner + rules/*.checks.json--> {verdict, health, results[]}`
+`raw records --normalize--> actions[] --rule.runner + rules/*.checks.json--> {verdict, health, results[]}`
 
-Three layers, one-way dependencies: `rules` (pure data) is read by `trajectory`; `trajectory` consumes `normalize` output; `normalize` doesn't depend on the upper layers. Engine and subject are **decoupled**: subjects live only in `rules/`.
+Three layers, one-way dependencies: `rules` (pure data) is read by `rule`; `rule` consumes `normalize` output; `normalize` doesn't depend on the upper layers. Engine and subject are **decoupled**: subjects live only in `rules/`.
 
 ## 1. Entry Points (all run under `evalkit/`)
 
 ```bash
 python3 -m normalize.cli {dump|table|stats|all} <session-id|path> [--official]
 python3 -m normalize.cli export-otel <session-id|path> --source {hook|official|both} [--out f] [--compact]
-python3 -m trajectory.runner <rules.json> (<normalized.json> | --session <id>) [--json] [--scoring <f>]
+python3 -m rule.runner <rules.json> (<normalized.json> | --session <id>) [--json] [--scoring <f>]
 ```
 
 - `--session <id>`: auto-reads the hook trace from `default_trace_dir()` (default `~/agent-trace/traces`, overridable via `KIRO_TRACE_DIR`) and normalizes.
@@ -21,7 +21,7 @@ python3 -m trajectory.runner <rules.json> (<normalized.json> | --session <id>) [
 - `export-otel --source`: `hook`=pure hook (enrich=False) / `official`=pure official / `both`=hook + official enrichment (enrich=True). Outputs OTLP/JSON (`ExportTraceServiceRequest`), see OTEL_MAPPING.md.
 - On exit, stdout is a human-readable table; `--json` outputs `{"verdict","health","results":[...]}`.
 
-## 2. Action Data Structure (produced by normalize, consumed by trajectory)
+## 2. Action Data Structure (produced by normalize, consumed by rule)
 
 Each action is a dict; key fields:
 
@@ -71,13 +71,13 @@ Each `<check>`: `{"id":str, "type":<checker>, "severity":<sev>, ...checker-speci
 
 ## 5.5 LLMJudge (LLM-as-judge checker)
 
-- `dimension` ∈ `efficiency` / `reasoning_quality` / `authenticity` (rubrics in `trajectory/llm_judge.py::RUBRICS`).
+- `dimension` ∈ `efficiency` / `reasoning_quality` / `authenticity` (rubrics in `rule/llm_judge.py::RUBRICS`).
 - **Not run by default**: without `--llm`, runner **gracefully skips** these rules (passed=True, confidence=0, excluded from verdict and health score). Backend is only called when `--llm` is passed.
 - Backend = `kiro-cli chat --no-interactive --trust-tools= --agent kiro-judge` (uses Kiro as the LLM; the judge agent has no tools). `--judge-agent` / `--effort` are tunable.
 - Three-part prompt = RUBRIC (per dimension) + TASK (objective + dimension) + TRAJECTORY (`normalize/judge_view.py` Plan B view: per-step action + target + purpose + think).
 - Advisory: results carry `confidence` (running=0.9); **errors / no backend → non-punitive pass**, avoiding misjudgment from LLM jitter.
 - objective is taken by runner from `--session`'s ir.prompts[0] or normalized.json's `prompts[0]`, passed via context.
-- Usage: `python3 -m trajectory.runner rules/agent-eval.checks.json <norm.json> --llm`
+- Usage: `python3 -m rule.runner rules/agent-eval.checks.json <norm.json> --llm`
 
 ## 5. matcher (values of `match`/`a`/`b`/`exclude`/`steps[]`)
 
@@ -123,14 +123,14 @@ Key points:
 ## 9. Common Task Recipes
 
 - **Write a rule for a new agent**: `normalize.cli dump --official <qualified run>` to see actions → distill → write `rules/<agent>.checks.json` → verify no misjudgment on real run + negative sample catches → done.
-- **Add a new checker type**: write `check_xxx(cp,actions)->CheckResult` in `trajectory/checkers.py`, register in `CHECKERS`, declare required keys in `_REQUIRED_KEYS`, add `_validate` branch, add tests.
+- **Add a new checker type**: write `check_xxx(cp,actions)->CheckResult` in `rule/checkers.py`, register in `CHECKERS`, declare required keys in `_REQUIRED_KEYS`, add `_validate` branch, add tests.
 - **Change verdict/weights**: only edit `rules/scoring.json`, no code changes.
 - **Archive a run (parent + children)**: `bash ~/agent-trace/archive/pack_run.sh <parent-session-id>` (recursively pulls the full tree by `parent_session_id`, stores official + hook + normalized).
 
 ## 10. Tests
 
 ```bash
-python3 -m unittest trajectory.tests.test_trajectory      # 24 items
+python3 -m unittest rule.tests.test_trajectory      # 24 items
 python3 -m unittest discover -s normalize/tests -t .      # 93 items
 ```
 

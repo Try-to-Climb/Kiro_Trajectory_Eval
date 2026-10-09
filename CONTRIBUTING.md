@@ -17,10 +17,10 @@ Python 3.10+.
 ## Running tests
 
 ```bash
-# evalkit (normalize + trajectory)
+# evalkit (normalize + rule)
 cd evalkit
 python3 -m unittest discover -s normalize/tests -t .
-python3 -m unittest discover -s trajectory/tests -t .
+python3 -m unittest discover -s rule/tests -t .
 
 # eval-agent
 cd ../eval-agent
@@ -35,10 +35,10 @@ All tests must pass before opening a PR.
 2. Normalize them and inspect the action sequence: `python3 -m normalize.cli dump --official <session-id>`.
 3. Extract the pattern: what must always happen (`required`), what's optional (`recommended`), what must never happen (`forbidden`).
 4. Write `evalkit/rules/<subject>.checks.json`. See [`evalkit/rules/AUTHORING.md`](evalkit/rules/AUTHORING.md) for intent-driven syntax.
-5. Validate: `python3 -m trajectory.runner rules/<subject>.checks.json --compile`.
+5. Validate: `python3 -m rule.runner rules/<subject>.checks.json --compile`.
 6. Test with a real good run and a real bad run.
 
-The engine (`normalize/`, `trajectory/`) should not need changes.
+The engine (`normalize/`, `rule/`) should not need changes.
 
 ## Adding a new direction to eval-agent
 

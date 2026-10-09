@@ -35,7 +35,7 @@ The **default policy** shipped here blocks 5 destructive shell patterns (rm -rf 
 
 ## `kiro-judge.json` — Judge agent for evalkit's LLMJudge
 
-`evalkit/trajectory/llm_judge.py` needs an LLM that "returns only rubric-scored JSON and never calls a tool". This config defines exactly that:
+`evalkit/rule/llm_judge.py` needs an LLM that "returns only rubric-scored JSON and never calls a tool". This config defines exactly that:
 
 - `tools: []` + `allowedTools: []` — refuses every tool call
 - `prompt` insists on "output only the requested JSON code block"
@@ -52,4 +52,4 @@ The **default policy** shipped here blocks 5 destructive shell patterns (rm -rf 
 |---|---|---|
 | `traced-agent.json` | `install.sh` | Installer time |
 | `policy.json` | `hooks/trace-hook.sh` | Every `preToolUse` |
-| `kiro-judge.json` | `evalkit/trajectory/llm_judge.py` (via kiro-cli) | When a rule has `LLMJudge` and the user passed `--llm` |
+| `kiro-judge.json` | `evalkit/rule/llm_judge.py` (via kiro-cli) | When a rule has `LLMJudge` and the user passed `--llm` |

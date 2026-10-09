@@ -7,7 +7,7 @@ evalkit's `TraceIR` is field-level aligned with the OpenTelemetry **GenAI semant
 We explicitly **align only on the vocabulary (semantic conventions); we do not adopt the OTLP wire format as our native model.** Reasons:
 
 - **Stability**: the GenAI agent span spec is currently `Status: Development` (verified 2026-08, split off into `open-telemetry/semantic-conventions-genai`), and its fields will change. Building the foundation on an evolving spec is unstable; keeping it at the boundary (a projection layer) is right.
-- **Don't sacrifice the rule engine**: trajectory's checkers depend on `TraceIR`'s flat `actions[]` (`path`/`command`/`idx` are directly queryable). If the native format became a nested OTLP span tree, matcher/checker would all have to be rewritten to traverse the tree and unpack `arguments` JSON — rewriting the one irreplaceable part with zero functional gain.
+- **Don't sacrifice the rule engine**: rule's checkers depend on `TraceIR`'s flat `actions[]` (`path`/`command`/`idx` are directly queryable). If the native format became a nested OTLP span tree, matcher/checker would all have to be rewritten to traverse the tree and unpack `arguments` JSON — rewriting the one irreplaceable part with zero functional gain.
 - **Ergonomics**: OTLP is a protobuf wire format, not ideal for direct manipulation in analysis code. Even OTel tools work with in-memory objects and only serialize at the boundary.
 
 Hence: `TraceIR` remains a stable, flat, handy **working model**; `normalize/otel_semconv.py` provides a **pure-dict projection** (no protobuf, no SDK dependency); if we ever really need to emit OTLP, feed this projection into the official SDK — 1:1 lossless.

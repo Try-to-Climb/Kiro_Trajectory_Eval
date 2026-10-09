@@ -23,7 +23,7 @@ sys.path.insert(0, _HERE)
 
 from normalize import load_trace_from_official, normalize_file, default_trace_dir  # noqa: E402
 from normalize.otel_export import to_otlp_json                                     # noqa: E402
-from trajectory.runner import run, load_actions                                   # noqa: E402
+from rule.runner import run, load_actions                                   # noqa: E402
 
 RULES_DIR = os.path.join(_HERE, "rules")
 PACK_SH = os.path.abspath(os.path.join(_HERE, "..", "archive", "pack_run.sh"))
@@ -100,7 +100,7 @@ def main() -> None:
     # -- 4. evaluate --
     context = {"objective": objective, "llm_caller": None}
     if args.llm:
-        from trajectory import llm_judge
+        from rule import llm_judge
         context["llm_caller"] = lambda p: llm_judge.kiro_caller(
             p, agent=args.judge_agent, effort=args.effort)
         log.append(f"llm: enabled (judge-agent={args.judge_agent}, effort={args.effort or 'default'})")

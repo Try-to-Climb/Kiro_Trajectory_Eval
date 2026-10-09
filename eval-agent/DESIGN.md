@@ -8,7 +8,7 @@ Status: three directions are fixed (`goal_completion` / `efficiency` / `complian
 
 ## 1. Why not the current LLMJudge
 
-The existing `trajectory/llm_judge.py` is one-shot: `judge_view.py` compresses the trajectory into a compact view → sends it, together with the rubric, in one shot to `kiro-judge` → gets back a 1–4 score. Problems:
+The existing `rule/llm_judge.py` is one-shot: `judge_view.py` compresses the trajectory into a compact view → sends it, together with the rubric, in one shot to `kiro-judge` → gets back a 1–4 score. Problems:
 
 - Overly long trajectories must be truncated; the LLM doesn't know what it didn't see
 - No follow-up questions, no way to verify hypotheses, verdict not reviewable (only a score and a paragraph)

@@ -15,7 +15,7 @@
 <!-- What did you run? Attach output snippets. -->
 
 - [ ] `evalkit`: `python -m unittest discover -s normalize/tests -t .` passes
-- [ ] `evalkit`: `python -m unittest discover -s trajectory/tests -t .` passes
+- [ ] `evalkit`: `python -m unittest discover -s rule/tests -t .` passes
 - [ ] `eval-agent`: `python -m unittest discover -s tests -t .` passes
 - [ ] Added new tests covering the change
 

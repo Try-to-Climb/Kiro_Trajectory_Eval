@@ -21,11 +21,11 @@ Python 3.10+. Core has **zero third-party dependencies** (only `matplotlib` for 
 ```bash
 # 1. Try the built-in sample (no data or setup needed)
 cd evalkit
-python3 -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
+python3 -m rule.runner rules/example-minimal.checks.json examples/sample.normalized.json
 # expected: PASS  health=1.0
 
 # 2. Evaluate one of your own Kiro sessions
-python3 -m trajectory.runner rules/<your-rule>.checks.json --session <session-id> --official
+python3 -m rule.runner rules/<your-rule>.checks.json --session <session-id> --official
 
 # 3. Export to OpenTelemetry OTLP/JSON (view in Jaeger / Tempo / otel-collector)
 python3 -m normalize.cli export-otel <session-id> --source official --out trace.json
@@ -57,7 +57,7 @@ Kiro CLI is the AI coding agent whose sessions this toolkit evaluates. You do **
 
 `kiro-cli` is only required for:
 - `eval-agent/runner.py` full pipeline (skip with `--no-llm` for deterministic-only evaluation)
-- `evalkit/trajectory` `LLMJudge` checker (opt-in via `--llm`)
+- `evalkit/rule` `LLMJudge` checker (opt-in via `--llm`)
 - `evalkit/rules/generate-rule.sh` (a convenience script that drafts a rule from an agent config)
 
 If you don't use `kiro-cli`, the declarative-rule path (`evalkit/`) and the deterministic subset of the forensic path (`eval-agent/ --no-llm`) still work fully.

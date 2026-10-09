@@ -77,7 +77,7 @@ s1/s2/s3 are independent and can run in parallel; the two chains `s4→s5→s6` 
 
 ## Relationship to evalkit
 
-**Facts shared, verdicts separate.** Normalization (action sequences, idx numbering, fan-out, alias normalization) fully reuses `evalkit/normalize`, no changes; matchers reuse `evalkit/trajectory/checkers.py`. The two paths must produce the same action sequence for the same run, otherwise they cannot cross-check each other.
+**Facts shared, verdicts separate.** Normalization (action sequences, idx numbering, fan-out, alias normalization) fully reuses `evalkit/normalize`, no changes; matchers reuse `evalkit/rule/checkers.py`. The two paths must produce the same action sequence for the same run, otherwise they cannot cross-check each other.
 
 The verdict layer does not shoehorn itself into `CheckResult` — goal_completion is naturally three-state + evidence-tiered + residual + overclaim. When merging reports, use `schema.Finding.to_check_result()` as an adapter.
 

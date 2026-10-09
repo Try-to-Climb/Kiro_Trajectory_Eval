@@ -25,7 +25,7 @@ Full field spec lives in [`evalkit/normalize/README.md`](../normalize/README.md)
 
 ```bash
 cd evalkit
-python3 -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
+python3 -m rule.runner rules/example-minimal.checks.json examples/sample.normalized.json
 ```
 
 Expected: `PASS` / health `1.0`.

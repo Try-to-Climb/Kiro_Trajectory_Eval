@@ -1,4 +1,4 @@
-"""Let eval-agent import evalkit's normalize / trajectory packages.
+"""Let eval-agent import evalkit's normalize / rule packages.
 
 The fact layer (normalization) is shared with evalkit and does not fork — the
 two evaluation paths must produce the same action sequence and idx numbering

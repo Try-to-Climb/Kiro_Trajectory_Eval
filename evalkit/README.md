@@ -22,17 +22,17 @@ None of this is visible from the final output. You can only catch it by laying o
 Kiro raw records                       evalkit
 ─────────────                          ─────────────────────────────────────
 hook trace   ┐                         ┌─ normalize/  raw records → unified action sequence (TraceIR)
-official session ┘  ─────────────────► │  trajectory/  validate action sequence against rules; emit verdict + health score
+official session ┘  ─────────────────► │  rule/  validate action sequence against rules; emit verdict + health score
                                        └─ rules/      one rule file per subject-under-test (pure data)
 ```
 
 | Layer | Directory | Responsibility | Relation to subject-under-test |
 |-------|-----------|----------------|--------------------------------|
 | Data | `normalize/` | raw records → `actions[]` (fan-out / alias normalization / semantic extraction / official enrichment) | independent, generic |
-| Engine | `trajectory/` | walk through rules against the action sequence, aggregate into a verdict | independent, generic |
+| Engine | `rule/` | walk through rules against the action sequence, aggregate into a verdict | independent, generic |
 | Rules | `rules/` | declare "how this agent should behave" (one `.checks.json` per agent) | **the subject lives here; changing subjects only means changing rules** |
 
-**Key design: the engine is decoupled from the subject-under-test.** `normalize` and `trajectory` are the "evaluation software"; agent-eval, eval-security-tester, etc. are the "subjects under test", and their expected trajectories are placed as data under `rules/`. Adding a new subject = writing one rule file; the engine is not touched.
+**Key design: the engine is decoupled from the subject-under-test.** `normalize` and `rule` are the "evaluation software"; agent-eval, eval-security-tester, etc. are the "subjects under test", and their expected trajectories are placed as data under `rules/`. Adding a new subject = writing one rule file; the engine is not touched.
 
 ---
 
@@ -58,9 +58,9 @@ python3 -m normalize.cli dump  <session-id>            # full JSONL
 python3 -m normalize.cli dump  --official <session-id> # use the official-records source
 
 # ② Evaluate the trajectory against a subject's rules
-python3 -m trajectory.runner rules/agent-eval.checks.json --session <session-id>
+python3 -m rule.runner rules/agent-eval.checks.json --session <session-id>
 #   or against an already-normalized file:
-python3 -m trajectory.runner rules/agent-eval.checks.json path/to/normalized.json
+python3 -m rule.runner rules/agent-eval.checks.json path/to/normalized.json
 
 # ③ One-shot export to OpenTelemetry OTLP/JSON (feeds Jaeger/Tempo/otel-collector)
 python3 -m normalize.cli export-otel <session-id> --source hook     --out t.json
@@ -97,19 +97,19 @@ CPN1_no_eval_script   Forbidden  forbidden   ✓  orchestrator forbidden from ru
 
 ## 4.5 How to run it after download (external users)
 
-**Environment**: Python 3.10+. The core (evaluation + normalization + OTLP export) has **zero third-party dependencies**; only rendering PNG timelines needs `pip install matplotlib`. Commands must be run from the `evalkit/` directory (`normalize`/`trajectory` are imported as top-level packages).
+**Environment**: Python 3.10+. The core (evaluation + normalization + OTLP export) has **zero third-party dependencies**; only rendering PNG timelines needs `pip install matplotlib`. Commands must be run from the `evalkit/` directory (`normalize`/`rule` are imported as top-level packages).
 
 **Try it right now** (the repo ships with anonymized samples; no data required):
 ```bash
 cd evalkit
-python3 -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
+python3 -m rule.runner rules/example-minimal.checks.json examples/sample.normalized.json
 # Expected: ✅ PASS health=1.0
 ```
 
 **Using your own agent's data**, three options:
 1. **Kiro official session source (easiest)**: as long as you use Kiro CLI, the records live in `$KIRO_HOME/sessions/cli/`; use them directly:
    ```bash
-   python3 -m trajectory.runner rules/<your-rule>.checks.json --session <session-id> --official  # runner side
+   python3 -m rule.runner rules/<your-rule>.checks.json --session <session-id> --official  # runner side
    python3 -m normalize.cli dump --official <session-id>                                          # look at actions first
    ```
 2. **hook trace source**: requires the companion **hook collection component** (see `hooks/` + `install.sh` at the repo root); once installed, agent runs write traces to `~/agent-trace/traces` (override with `KIRO_TRACE_DIR`), then read with `--session <id>`.
@@ -127,10 +127,10 @@ cd evalkit
 bash rules/generate-rule.sh
 
 # ② Self-check: verify the rules compile correctly (any issues are listed; non-zero exit)
-python3 -m trajectory.runner rules/<your-agent>.checks.json --compile
+python3 -m rule.runner rules/<your-agent>.checks.json --compile
 
 # ③ Evaluate: run against your session
-python3 -m trajectory.runner rules/<your-agent>.checks.json --session <id> --official
+python3 -m rule.runner rules/<your-agent>.checks.json --session <id> --official
 #   or one-shot: python3 pipeline.py <session-id>
 ```
 
@@ -191,7 +191,7 @@ evalkit/
 │   ├── attribution.py             attribute sub-agents to the real session in multi-run scenarios
 │   ├── schema.py mapping.py cli.py viz.py
 │   └── tests/                     93 unit tests
-├── trajectory/                  engine layer
+├── rule/                  engine layer
 │   ├── README.md                  engine + rule authoring
 │   ├── checkers.py                7 checkers + matcher + validation gate
 │   ├── runner.py                  run rules, aggregate verdict, load scoring
@@ -214,7 +214,7 @@ evalkit/
 2. Distill the key nodes: things done every time → required; sometimes skipped → recommended; must never appear → forbidden; ordered → Milestone/Before; word-must-match-deed → IfThen; produced artifacts → Produces
 3. Write `rules/<subject>.checks.json` (format in `rules/README.md`)
 4. Validate on real runs that it does not misjudge; then check with negative samples that it can catch FAIL
-5. `python3 -m trajectory.runner rules/<subject>.checks.json --session <id>`
+5. `python3 -m rule.runner rules/<subject>.checks.json --session <id>`
 
 The engine and normalization layers do not need to change.
 
@@ -232,7 +232,7 @@ The engine and normalization layers do not need to change.
 
 ```bash
 cd ~/agent-trace/evalkit
-python3 -m unittest trajectory.tests.test_trajectory          # 24 engine tests
+python3 -m unittest rule.tests.test_trajectory          # 24 engine tests
 python3 -m unittest discover -s normalize/tests -t .          # 93 data-layer tests
 ```
 

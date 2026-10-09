@@ -1,4 +1,4 @@
-# trajectory — Trajectory Evaluation Engine
+# rule — Trajectory Evaluation Engine
 
 A general-purpose agent trajectory verification engine. Input is a **normalized action sequence** (from `normalize`); given a set of **checkpoint rules**, it decides whether the run "followed the expected trajectory", outputting PASS / WEAK_PASS / FAIL + a health score + per-check reason.
 
@@ -24,13 +24,13 @@ Rule files are not in this package; they live at `../rules/<subject>.checks.json
 
 ```bash
 # Run from the project root (evalkit/)
-python3 -m trajectory.runner rules/<subject>.checks.json <normalized.json>
+python3 -m rule.runner rules/<subject>.checks.json <normalized.json>
 
 # Evaluate a hook session directly (auto-normalizes)
-python3 -m trajectory.runner rules/<subject>.checks.json --session <session-id>
+python3 -m rule.runner rules/<subject>.checks.json --session <session-id>
 
 # JSON output (for downstream consumers)
-python3 -m trajectory.runner rules/<subject>.checks.json <normalized.json> --json
+python3 -m rule.runner rules/<subject>.checks.json <normalized.json> --json
 ```
 
 Example output (excerpt):
@@ -132,7 +132,7 @@ hook trace / official session records
         │  normalize (fan-out / alias / semantics / official enrichment)
         ▼
    normalized.json  (actions[])
-        │  trajectory.runner + rules/<subject>.checks.json
+        │  rule.runner + rules/<subject>.checks.json
         ▼
    PASS / WEAK_PASS / FAIL + health score + per-check reason
 ```

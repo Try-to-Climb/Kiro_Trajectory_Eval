@@ -1,8 +1,8 @@
 """LLM-as-judge offline tests: use a fake caller; do not call kiro for real."""
 import unittest
 
-from trajectory import llm_judge
-from trajectory.checkers import run_check
+from rule import llm_judge
+from rule.checkers import run_check
 
 
 def _acts():

@@ -2,8 +2,8 @@
 output the aggregate verdict.
 
 Usage:
-    python3 -m trajectory.runner <checks.json> <normalized.json>
-    python3 -m trajectory.runner <checks.json> --session <sid>   # normalize hook trace directly
+    python3 -m rule.runner <checks.json> <normalized.json>
+    python3 -m rule.runner <checks.json> --session <sid>   # normalize hook trace directly
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from trajectory.checkers import run_check  # noqa: E402
+from rule.checkers import run_check  # noqa: E402
 
 
 def load_actions(normalized_path: str) -> tuple[list[dict], dict]:
@@ -108,7 +108,7 @@ def verdict(results: list, scoring: dict | None = None) -> tuple[str, float]:
 def run(checks_path: str, actions: list[dict], scoring_path: str | None = None,
         context: dict | None = None) -> dict:
     spec = json.load(open(checks_path, encoding="utf-8"))
-    from trajectory.rules_dsl import desugar_checks
+    from rule.rules_dsl import desugar_checks
     checks = desugar_checks(spec.get("checks", []))     # intent -> low-level checker (rules with type are passed through)
     results = [run_check(cp, actions, context) for cp in checks]
     v, health = verdict(results, load_scoring(scoring_path))
@@ -137,8 +137,8 @@ def main() -> None:
         except (OSError, json.JSONDecodeError) as e:
             print(f"[compile] rule file could not be parsed: {e}", file=sys.stderr)
             sys.exit(2)
-        from trajectory.rules_dsl import desugar_checks
-        from trajectory.checkers import _validate
+        from rule.rules_dsl import desugar_checks
+        from rule.checkers import _validate
         checks = desugar_checks(spec.get("checks", []))
         print(json.dumps({"target_agent": spec.get("target_agent"), "checks": checks},
                          ensure_ascii=False, indent=2))
@@ -174,7 +174,7 @@ def main() -> None:
 
     context = {"objective": objective, "llm_caller": None}
     if args.llm:
-        from trajectory import llm_judge
+        from rule import llm_judge
         context["llm_caller"] = lambda p: llm_judge.kiro_caller(
             p, agent=args.judge_agent, effort=args.effort)
 

@@ -2,7 +2,7 @@
 
 > **Want to get started quickly?** Use the **structured intent** syntax (reads/runs/write/dispatches/pipeline/never_*/if_claims…/judge) — no regex required. See **[AUTHORING.md](AUTHORING.md)**. This document describes the low-level checkers (which intents compile down to).
 
-A rule file = one subject-under-test's "expected trajectory", named `<subject>.checks.json`. The engine (`../trajectory/`) reads it and decides whether a run is PASS / WEAK_PASS / FAIL.
+A rule file = one subject-under-test's "expected trajectory", named `<subject>.checks.json`. The engine (`../rule/`) reads it and decides whether a run is PASS / WEAK_PASS / FAIL.
 
 ## Examples in this directory
 
@@ -99,9 +99,9 @@ Not sure which actions appear in a given run? First run `python3 -m normalize.cl
 
 ```bash
 cd ~/agent-trace/evalkit
-python3 -m trajectory.runner rules/<subject>.checks.json --session <session-id>
+python3 -m rule.runner rules/<subject>.checks.json --session <session-id>
 # or against an already-normalized file:
-python3 -m trajectory.runner rules/<subject>.checks.json path/to/normalized.json
+python3 -m rule.runner rules/<subject>.checks.json path/to/normalized.json
 ```
 
 ## Scoring and verdict configuration (scoring.json)
@@ -142,7 +142,7 @@ Verdict flow: if any FAIL condition holds → FAIL; otherwise, if any WEAK condi
 Usage:
 ```bash
 # Use the default rules/scoring.json
-python3 -m trajectory.runner rules/<subject>.checks.json --session <id>
+python3 -m rule.runner rules/<subject>.checks.json --session <id>
 # Use custom scoring
-python3 -m trajectory.runner rules/<subject>.checks.json --session <id> --scoring my-scoring.json
+python3 -m rule.runner rules/<subject>.checks.json --session <id> --scoring my-scoring.json
 ```

@@ -476,11 +476,11 @@ Output: {path → [(ref, turn, action), ...]}, keeping only ≥ 2 writes
 ```
 39 paths written multiple times (top 6):
   19× ~/.../evalkit/rules/AUTHORING.md
-  17× ~/.../evalkit/trajectory/rules_dsl.py
+  17× ~/.../evalkit/rule/rules_dsl.py
   11× ~/.../normalize/core.py
   11× ~/.../README.md
-  10× ~/.../evalkit/trajectory/tests/test_rules_dsl.py
-   7× ~/.../evalkit/trajectory/checkers.py
+  10× ~/.../evalkit/rule/tests/test_rules_dsl.py
+   7× ~/.../evalkit/rule/checkers.py
 ```
 
 ### Interpretation

@@ -161,7 +161,7 @@ Full semantics of low-level checkers live in `../LLM_GUIDE.md` (§4 seven checke
 Compile intent rules to low-level checkers and print (without evaluating), to verify that the compilation matches expectation:
 
 ```bash
-python3 -m trajectory.runner rules/<your>.checks.json --compile
+python3 -m rule.runner rules/<your>.checks.json --compile
 ```
 
 The compiled result goes to stdout; `--compile` also **self-checks** and writes issues to stderr:
@@ -171,7 +171,7 @@ The compiled result goes to stdout; `--compile` also **self-checks** and writes 
 
 Evaluate:
 ```bash
-python3 -m trajectory.runner rules/<your>.checks.json <normalized.json | --session <id> --official>
+python3 -m rule.runner rules/<your>.checks.json <normalized.json | --session <id> --official>
 # or one-shot: python3 pipeline.py <session-id>
 ```
 
@@ -191,4 +191,4 @@ python3 -m trajectory.runner rules/<your>.checks.json <normalized.json | --sessi
 | `{"if_claims":"LIVE","then_runs":"*_acp.py"}` | `{"type":"IfThen","a":{"regex":"LIVE"},"b":{"action":"run_command","regex":".*_acp\\.py"}}` |
 | `{"judge":"efficiency"}` | `{"type":"LLMJudge","dimension":"efficiency","pass_threshold":0.75}` |
 
-Reference implementation: `../trajectory/rules_dsl.py`. Runnable examples: `example-intent.checks.json`, `agent-eval.intent.checks.json`.
+Reference implementation: `../rule/rules_dsl.py`. Runnable examples: `example-intent.checks.json`, `agent-eval.intent.checks.json`.
