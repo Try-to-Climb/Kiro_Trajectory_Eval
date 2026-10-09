@@ -1,6 +1,6 @@
-# eval-agent/docs/ — Deep-dive documents
+# evalkit/goal/docs/ — Deep-dive documents
 
-`eval-agent`'s top-level [`README.md`](../README.md) covers usage; `../DESIGN.md` covers architecture and tradeoffs. This directory holds **topic-specific deep-dive documents**.
+`goal`'s top-level [`README.md`](../README.md) covers usage; `../DESIGN.md` covers architecture and tradeoffs. This directory holds **topic-specific deep-dive documents**.
 
 ## Index
 

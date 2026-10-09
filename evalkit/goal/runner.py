@@ -1,11 +1,11 @@
-"""eval-agent orchestrator.
+"""goal orchestrator.
 
 The first version is an **orchestrator**, not an autonomous agent: the nine steps run in a fixed
 order, and the LLM is only invoked as a function in s2/s3/s4/s8. Upsides: unit-testable,
 reproducible, predictable cost. Once this is stable we can consider giving s8 bounded follow-up
 (a planned mode).
 
-Usage (from the eval-agent/ directory):
+Usage (from the evalkit/goal/ directory):
   python3 runner.py <session-id>                       # full pipeline
   python3 runner.py <session-id> --no-llm              # deterministic steps only (s1)
   python3 runner.py <session-id> --requirements f.json # inject human-confirmed requirements, skip s2
@@ -23,10 +23,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import schema                       # noqa: E402
-import steps                        # noqa: E402
+from . import schema                 # noqa: E402
+from . import steps                  # noqa: E402
 from evidence.loader import load_run_tree   # noqa: E402
 from llm import LLMOutputError, LLMUnavailable   # noqa: E402
 
@@ -81,7 +79,7 @@ def run(session_id: str, *, official_dir: Optional[str] = None,
     log = (lambda *a: print(*a, file=sys.stderr)) if verbose else (lambda *a: None)
 
     # ---- s0: agent-under-test context (optional; when injected, s2/s3 extraction better fits agent capabilities) ----
-    from agent_context import load_agent_context_or_empty  # noqa: E402
+    from .agent_context import load_agent_context_or_empty  # noqa: E402
     agent_ctx, ctx_meta = load_agent_context_or_empty(
         agent_dir, mode=agent_mode, caller=caller,
         log=lambda *a: log(*a))
@@ -229,7 +227,7 @@ def render(res: dict[str, Any]) -> str:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(prog="eval-agent",
+    p = argparse.ArgumentParser(prog="goal",
                                 description="goal_completion: did the agent do what the user asked?")
     p.add_argument("session")
     p.add_argument("--official-dir")

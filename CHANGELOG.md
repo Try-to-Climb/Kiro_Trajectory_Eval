@@ -22,7 +22,7 @@ Initial public release.
 - Example rules for the sample agent-eval orchestrator and eval-security-tester (single-turn / multi-turn variants), plus fully commented starter rules (`rules/example-*.checks.json`).
 - Configurable scoring (`rules/scoring.json`) — weights per severity, verdict thresholds, and per-checker binarization.
 
-**eval-agent** (forensic evaluator)
+**goal** (forensic evaluator)
 - Nine-step pipeline: `map` → `extract requirements (LLM)` → `inject control` → `extract claims (LLM)` → `compile criteria (LLM)` → `search evidence` → `judge (LLM)` → `overclaim check` → `finalize`.
 - Every LLM output passes a code validation gate; every conclusion must cite evidence action IDs that exist in the trajectory.
 - Built-in synthetic control requirement invalidates the run if the model incorrectly accepts it.

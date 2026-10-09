@@ -40,7 +40,7 @@ rm -rf ~/agent-trace/traces/<session-id>   # manual
 ## Threat model
 
 **In scope**:
-- Vulnerabilities in the evaluator code (evalkit, eval-agent) that could execute arbitrary code from crafted trace input.
+- Vulnerabilities in the evaluator code (evalkit, goal) that could execute arbitrary code from crafted trace input.
 - Injection issues in the hook collector shell scripts.
 - Path traversal / arbitrary file read in the loaders.
 

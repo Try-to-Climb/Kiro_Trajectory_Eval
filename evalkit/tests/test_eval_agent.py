@@ -1,7 +1,7 @@
-"""eval-agent unit tests: deterministic parts + validation gate. Does not touch
+"""goal unit tests: deterministic parts + validation gate. Does not touch
 the LLM backend (all callers are stubbed).
 
-Run: cd eval-agent && python3 -m unittest discover -s tests -t .
+Run: cd goal && python3 -m unittest discover -s tests -t .
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import llm                                   # noqa: E402
-import schema                                # noqa: E402
-import steps                                 # noqa: E402
+from goal import schema                      # noqa: E402
+from goal import steps                       # noqa: E402
 from evidence import api                     # noqa: E402
 from evidence.loader import RunTree, SessionNode   # noqa: E402
 

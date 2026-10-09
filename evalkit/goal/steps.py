@@ -12,8 +12,8 @@ import re
 from collections import Counter
 from typing import Any, Callable, Optional
 
-import prompts
-import schema
+from . import prompts
+from . import schema
 from evidence import api
 from evidence.loader import RunTree
 from llm import ask

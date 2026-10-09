@@ -1,6 +1,6 @@
-# eval-agent/directions/ — Evaluation direction definitions
+# evalkit/goal/directions/ — Evaluation direction definitions
 
-`eval-agent` uses the concept of a **direction** to separate different evaluation perspectives. A direction defines **what question to ask** (e.g. "did the user's requests get done?") plus **how the 9 steps run** (per-step input/output/validation), a **budget** (LLM call count, timeout), and **degrade behavior** (what to do when data is incomplete).
+`goal` uses the concept of a **direction** to separate different evaluation perspectives. A direction defines **what question to ask** (e.g. "did the user's requests get done?") plus **how the 9 steps run** (per-step input/output/validation), a **budget** (LLM call count, timeout), and **degrade behavior** (what to do when data is incomplete).
 
 Currently one direction is implemented: `goal_completion`. Future directions could include `correctness`, `efficiency`, `safety` — one JSON per direction.
 

@@ -16,7 +16,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import _bootstrap  # noqa: F401  (inserts evalkit into sys.path)
 from normalize.official import default_official_dir
 from normalize.official_loader import load_trace_from_official
 

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a defect in evalkit, eval-agent, or the hook collector
+about: Report a defect in evalkit, goal, or the hook collector
 title: "[bug] "
 labels: bug
 ---
@@ -28,7 +28,7 @@ Do NOT include real user data, credentials, or command outputs that contain secr
 
 - OS:
 - Python version (`python3 --version`):
-- Component: `evalkit` / `eval-agent` / `hooks`
+- Component: `evalkit` / `goal` / `hooks`
 - Version / commit hash:
 
 ## Additional context

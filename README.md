@@ -2,12 +2,13 @@
 
 **Kiro_Trajectory_Eval** turns a Kiro CLI agent run into a structured, auditable evaluation. It reads the session record that Kiro writes to `$KIRO_HOME/sessions/cli/`, normalizes it into a stable action sequence, and judges whether the agent **actually did what it said it did** — matching the run's real behavior against its stated intent, produced artifacts, and user requirements.
 
-Two evaluation paths share the same normalization layer:
+Everything now lives under [`evalkit/`](evalkit/README.md), sharing one fact layer (`normalize/` + `evidence/`) and splitting into three verdict paths:
 
-| Component | What it does | When to use |
+| Path | What it does | When to use |
 |---|---|---|
-| **[`evalkit/`](evalkit/README.md)** | Declarative rules over the normalized action sequence. Seven built-in checkers (`Exists` / `Count` / `Forbidden` / `Before` / `Milestone` / `IfThen` / `Produces`) plus optional `LLMJudge`. Outputs `PASS` / `WEAK_PASS` / `FAIL` and a health score. Can export **OpenTelemetry OTLP/JSON**. | "Did this run follow the expected trajectory? Does the agent's behavior match its self-reported actions?" |
-| **[`eval-agent/`](eval-agent/README.md)** | Forensic 9-step pipeline. Extracts atomic requirements from user prompts and self-claims from agent responses, then searches the trajectory for evidence. Each conclusion cites the action IDs it depends on, with a confidence score. | "Did the agent actually accomplish what the user asked for?" |
+| **[`evalkit/rule/`](evalkit/rule/README.md)** | Declarative rules over the normalized action sequence. Seven built-in checkers (`Exists` / `Count` / `Forbidden` / `Before` / `Milestone` / `IfThen` / `Produces`) plus optional `LLMJudge`. Outputs `PASS` / `WEAK_PASS` / `FAIL` and a health score. Can export **OpenTelemetry OTLP/JSON**. | "Did this run follow the expected trajectory? Does the agent's behavior match its self-reported actions?" |
+| **[`evalkit/goal/`](evalkit/goal/README.md)** | Forensic 9-step pipeline (rule-free). Extracts atomic requirements from user prompts and self-claims from agent responses, then searches the trajectory for evidence. Each conclusion cites the action IDs it depends on, with a confidence score. | "Did the agent actually accomplish what the user asked for?" |
+| **`evalkit/efficiency/`** | Cost / waste / churn / stuck: did this run spend its budget well, or re-read / re-write / loop? | "Was the run efficient?" |
 | **[`hooks/`](hooks/)** *(optional)* | Runtime Kiro CLI hook collector. Adds signals the built-in session records don't capture: `preToolUse` policy blocks, precise millisecond timing, live tracing. **Not required** — evaluation works out of the box using `--official`. | Only when you need signals beyond what Kiro's built-in records provide. |
 
 ## Why look at the trajectory instead of the final output?
@@ -33,17 +34,23 @@ python3 -m normalize.cli export-otel <session-id> --source official --out trace.
 
 For the forensic evaluator:
 ```bash
-cd eval-agent
-python3 runner.py <session-id>            # full pipeline (uses kiro-cli for LLM steps)
-python3 runner.py <session-id> --no-llm   # deterministic-only, no LLM calls
+cd evalkit
+python3 -m goal.runner <session-id>            # full pipeline (uses kiro-cli for LLM steps)
+python3 -m goal.runner <session-id> --no-llm   # deterministic-only, no LLM calls
 ```
 
 ## Repository layout
 
 ```
 Kiro_Trajectory_Eval/
-├── evalkit/          Declarative-rule evaluator (rules + engine + normalizer + OTel export)
-├── eval-agent/       Forensic evaluator (9-step pipeline, uses evalkit for normalization)
+├── evalkit/          Everything evaluation-related
+│   ├── normalize/       facts: raw records -> actions[]  (shared fact layer)
+│   ├── evidence/        run tree, IR cache, canonicalization, retrieval  (shared)
+│   ├── rule/            declarative rules + 7 checkers + LLMJudge
+│   ├── goal/            forensic 9-step goal-completion pipeline
+│   ├── efficiency/      cost / waste / churn / stuck
+│   ├── llm.py, kiro_acp.py    shared LLM plumbing
+│   └── rules/           per-subject rule files (data)
 ├── hooks/            Optional Kiro CLI hook collector (bash + jq)
 ├── bin/kiro-trace    CLI to inspect collected traces
 ├── config/           Sample configs: policy.json, traced-agent.json, kiro-judge.json
@@ -56,20 +63,20 @@ Kiro_Trajectory_Eval/
 Kiro CLI is the AI coding agent whose sessions this toolkit evaluates. You do **not** need it to run the core evaluators — declarative rules and normalization work directly on session records that Kiro writes to `$KIRO_HOME/sessions/cli/`.
 
 `kiro-cli` is only required for:
-- `eval-agent/runner.py` full pipeline (skip with `--no-llm` for deterministic-only evaluation)
+- `evalkit/goal/runner.py` full pipeline (skip with `--no-llm` for deterministic-only evaluation)
 - `evalkit/rule` `LLMJudge` checker (opt-in via `--llm`)
 - `evalkit/rules/generate-rule.sh` (a convenience script that drafts a rule from an agent config)
 
-If you don't use `kiro-cli`, the declarative-rule path (`evalkit/`) and the deterministic subset of the forensic path (`eval-agent/ --no-llm`) still work fully.
+If you don't use `kiro-cli`, the declarative-rule path (`evalkit/`) and the deterministic subset of the forensic path (`evalkit/goal/ --no-llm`) still work fully.
 
 ## Documentation
 
 - **5-minute tour**: [`docs/TOUR.md`](docs/TOUR.md) — how the pieces fit together, which one to look at first
-- Sub-project docs: [`evalkit/README.md`](evalkit/README.md), [`eval-agent/README.md`](eval-agent/README.md)
+- Sub-project docs: [`evalkit/README.md`](evalkit/README.md), [`evalkit/goal/README.md`](evalkit/goal/README.md)
 - Rule authoring: [`evalkit/rules/AUTHORING.md`](evalkit/rules/AUTHORING.md)
 - OpenTelemetry mapping: [`evalkit/OTEL_MAPPING.md`](evalkit/OTEL_MAPPING.md)
 - LLM reference: [`evalkit/LLM_GUIDE.md`](evalkit/LLM_GUIDE.md)
-- Forensic evaluator design: [`eval-agent/DESIGN.md`](eval-agent/DESIGN.md)
+- Forensic evaluator design: [`evalkit/goal/DESIGN.md`](evalkit/goal/DESIGN.md)
 
 ## Contributing
 

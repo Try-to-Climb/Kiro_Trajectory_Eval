@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kiro-trajectory-eval"
 version = "0.1.0"
-description = "Trajectory-level agent evaluation toolkit: declarative rules (evalkit) + forensic pipeline (eval-agent) + optional hook collector."
+description = "Trajectory-level agent evaluation toolkit: declarative rules (evalkit) + forensic pipeline (goal) + optional hook collector."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -38,7 +38,7 @@ Homepage = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval"
 Issues   = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/issues"
 Changelog = "https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/blob/master/CHANGELOG.md"
 
-# Both evalkit and eval-agent are runnable as -m modules from their own directories;
+# Both evalkit and goal are runnable as -m modules from their own directories;
 # no top-level package is installed via pip yet. This file exists to declare metadata,
 # python-requires, and optional extras.
 [tool.setuptools]

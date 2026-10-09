@@ -20,7 +20,6 @@ import re
 from collections import Counter
 from typing import Any, Callable, Optional
 
-import _bootstrap  # noqa: F401  (adds evalkit to sys.path)
 
 from evidence.loader import RunTree
 from evidence import api as evapi

@@ -1,4 +1,4 @@
-"""Verdict-layer data structures for eval-agent.
+"""Verdict-layer data structures for goal.
 
 We do not shoehorn into evalkit's CheckResult: goal_completion is inherently a
 tri-state judgment with evidence tiers + residual + overclaim, and squeezing it

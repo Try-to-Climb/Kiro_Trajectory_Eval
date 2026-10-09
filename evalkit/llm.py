@@ -16,7 +16,6 @@ import re
 import time
 from typing import Any, Callable, Optional
 
-import _bootstrap  # noqa: F401
 from kiro_acp import KiroAcpClient
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

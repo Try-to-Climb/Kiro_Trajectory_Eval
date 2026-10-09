@@ -16,7 +16,7 @@
 
 - [ ] `evalkit`: `python -m unittest discover -s normalize/tests -t .` passes
 - [ ] `evalkit`: `python -m unittest discover -s rule/tests -t .` passes
-- [ ] `eval-agent`: `python -m unittest discover -s tests -t .` passes
+- [ ] `goal`: `python -m unittest discover -s tests -t .` passes
 - [ ] Added new tests covering the change
 
 ## Checklist

@@ -1,6 +1,6 @@
-# eval-agent —— Forensic Trajectory Evaluation (Design Draft)
+# goal —— Forensic Trajectory Evaluation (Design Draft)
 
-> The second evaluation path, parallel to `evalkit/`. evalkit is **full static scan + deterministic rules**; eval-agent is **directed forensics per evaluation dimension** — the agent, holding a set of restricted read-only tools, retrieves needed evidence from the trace step by step, rather than dumping a truncated trajectory to the LLM in one shot.
+> The second evaluation path, parallel to `evalkit/`. evalkit is **full static scan + deterministic rules**; goal is **directed forensics per evaluation dimension** — the agent, holding a set of restricted read-only tools, retrieves needed evidence from the trace step by step, rather than dumping a truncated trajectory to the LLM in one shot.
 
 Status: three directions are fixed (`goal_completion` / `efficiency` / `compliance`). **`goal_completion` is implemented and runs end-to-end on two real sessions** (56 unit tests all green); 6 more bugs were fixed during implementation (see §5.4.1). `efficiency` / `compliance` not yet implemented. Usage in [`README.md`](README.md).
 
@@ -16,13 +16,13 @@ The existing `rule/llm_judge.py` is one-shot: `judge_view.py` compresses the tra
 
 **Reference: agent-as-a-judge (ICML 2025) and its limits**: it runs an evidence-collection workflow per requirement (`workspace → locate → read → search → history → trajectory`), tiered by `--setting`/`--planning`. But its main evidence arena is the **workspace** (`DevGraph` builds the code graph, `DevLocate` locates files, `DevRead` reads files); the trajectory step `DevTextRetrieve.llm_summary` is very coarse — concatenate all steps into a big string, truncate to 10k tokens, feed to LLM once. **Same problem as our LLMJudge.**
 
-So eval-agent is not a copy of it, but does the half it left undone (step-by-step forensics on the trajectory side).
+So goal is not a copy of it, but does the half it left undone (step-by-step forensics on the trajectory side).
 
 ---
 
 ## 2. Positioning: not "static vs dynamic", but "verdict vs explanation"
 
-| | evalkit | eval-agent |
+| | evalkit | goal |
 |---|---|---|
 | What is judged | Whether it matches the **predefined** trajectory | How well it ran / **why** it failed |
 | Premise | Known how the agent should run (must write rules first) | Don't know how it should run, or subjective dimensions rules can't judge |
@@ -30,7 +30,7 @@ So eval-agent is not a copy of it, but does the half it left undone (step-by-ste
 | Output | verdict + health score | findings (with evidence) + score |
 | Cold start | Requires human-written `.checks.json` first | Can run without rules |
 
-eval-agent should not repeat what evalkit can do. Its exclusive value is two things: **give explanations backed by evidence**, and **cold-start on a new agent without rules**.
+goal should not repeat what evalkit can do. Its exclusive value is two things: **give explanations backed by evidence**, and **cold-start on a new agent without rules**.
 
 ---
 
@@ -84,17 +84,17 @@ Output schema is isomorphic to `CheckResult` (`id/passed/severity/reason/confide
 
 ### 3.4 Orchestration layer
 
-The lowest-effort deployment: the evidence layer is a CLI (`python3 -m evidence.cli query --action run_command --regex ...`), eval-agent invokes it via shell, and the agent definition restricts tools to this one command + read-only. Once it works, consider wrapping as an MCP server. **Do not jump to MCP on day one.**
+The lowest-effort deployment: the evidence layer is a CLI (`python3 -m evidence.cli query --action run_command --regex ...`), goal invokes it via shell, and the agent definition restricts tools to this one command + read-only. Once it works, consider wrapping as an MCP server. **Do not jump to MCP on day one.**
 
 ---
 
 ## 4. Two interfaces with evalkit
 
-**Interface 1: hotspot-guided (check-up then follow-up).** Run evalkit first, feed the FAIL/WEAK checkpoints and their hit idxs as entry-point clues to eval-agent: "`CPN1_no_eval_script` hit at idx 214, find out why." Much more efficient than letting the agent roam from zero; the two go from "parallel" to "pipeline."
+**Interface 1: hotspot-guided (check-up then follow-up).** Run evalkit first, feed the FAIL/WEAK checkpoints and their hit idxs as entry-point clues to goal: "`CPN1_no_eval_script` hit at idx 214, find out why." Much more efficient than letting the agent roam from zero; the two go from "parallel" to "pipeline."
 
-The reverse also works: stable patterns eval-agent surfaces on rule-less agents, after human confirmation, **crystallize into `.checks.json`**, becoming zero-cost static checks next time. Positive feedback: dynamic discovery → static solidification.
+The reverse also works: stable patterns goal surfaces on rule-less agents, after human confirmation, **crystallize into `.checks.json`**, becoming zero-cost static checks next time. Positive feedback: dynamic discovery → static solidification.
 
-**Interface 2: dogfooding loop.** eval-agent itself generates a trace when it runs; write a `rules/eval-agent.checks.json` in evalkit to evaluate it:
+**Interface 2: dogfooding loop.** goal itself generates a trace when it runs; write a `rules/goal.checks.json` in evalkit to evaluate it:
 
 - `Exists` — must have called `query`/`verify`
 - `IfThen` — outputs an authenticity conclusion → must have called `verify` or `crosscheck` (**catches "concluded without collecting evidence"**, same paradigm as "claimed LIVE but never actually called the target")
@@ -257,4 +257,4 @@ The before/after fix comparison validates the value of P13~P15: hard-layer hits 
 
 - **Context still accumulates.** Step-by-step forensics doesn't equal saving context; accumulating 20 tool returns still explodes. Mitigation: each step must produce "intermediate conclusion + evidence idx" and then **discard the raw returns** — this is the real reason the ledger stores only idx.
 - **Cost.** Borrow AaaJ's dry-run: estimate tool calls and tokens first, then decide whether to run; over-budget downgrades to scripted, or falls back to evalkit-only.
-- **Meta-evaluation from day one.** At least three: ① items evalkit can judge deterministically, eval-agent should agree with (agreement rate = sanity score); ② existing fakery-negative samples must be caught; ③ evidence idxs can be replayed and verified by a script. Without this layer we can't answer "is it itself accurate?" — the single area where AaaJ beats us (it has 365 human annotations).
+- **Meta-evaluation from day one.** At least three: ① items evalkit can judge deterministically, goal should agree with (agreement rate = sanity score); ② existing fakery-negative samples must be caught; ③ evidence idxs can be replayed and verified by a script. Without this layer we can't answer "is it itself accurate?" — the single area where AaaJ beats us (it has 365 human annotations).

@@ -1,6 +1,6 @@
 # hooks/ — Optional Kiro CLI hook collector
 
-**You don't need this to evaluate.** `evalkit` and `eval-agent` read Kiro's built-in session records from `$KIRO_HOME/sessions/cli/` by default. What's in this directory is an **optional plugin** — install it only when you need signals the built-in records don't capture.
+**You don't need this to evaluate.** `evalkit` and `goal` read Kiro's built-in session records from `$KIRO_HOME/sessions/cli/` by default. What's in this directory is an **optional plugin** — install it only when you need signals the built-in records don't capture.
 
 ## When you want hooks
 

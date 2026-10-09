@@ -14,7 +14,6 @@ import os
 import sys
 from pathlib import Path
 
-import _bootstrap  # noqa: F401
 
 from evidence.loader import load_run_tree
 from efficiency import steps

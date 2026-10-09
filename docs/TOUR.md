@@ -34,7 +34,7 @@
                 ┌────────────┼────────────┐
                 ▼                         ▼
        ┌─────────────────┐       ┌─────────────────┐
-       │ evalkit/         │       │ eval-agent/     │
+       │ evalkit/         │       │ evalkit/goal/     │
        │ rule/      │       │ 9-step pipeline │
        │ rule matching    │       │ user reqs → evidence │
        └────────┬────────┘       └────────┬────────┘
@@ -48,7 +48,7 @@
 ## Which component do I want?
 
 - **Batch-check whether Kiro sessions followed the expected trajectory** (automated verdicts): `evalkit/`
-- **Deep-dive one run: did the agent actually accomplish what the user asked?** (need cited evidence): `eval-agent/`
+- **Deep-dive one run: did the agent actually accomplish what the user asked?** (need cited evidence): `evalkit/goal/`
 - **Audit every tool call, block dangerous ones, get millisecond timing**: install `hooks/`
 - **View agent behavior as a timeline in Jaeger / Tempo**: `evalkit/normalize/ export-otel`
 
@@ -64,15 +64,15 @@
 2. `evalkit/rules/AUTHORING.md` — intent-DSL tutorial (`reads` / `runs` / `pipeline` keywords)
 3. `evalkit/rules/example-all-checkers.checks.json` — annotated example of all 7 checkers
 
-**Want to understand how eval-agent does "evidence gathering"**:
-1. `eval-agent/README.md` — table of the 9-step pipeline
-2. `eval-agent/docs/R10.1_walkthrough.md` — one real requirement traced through all 9 steps
-3. `eval-agent/DESIGN.md` — design rationale and rejected alternatives
+**Want to understand how goal does "evidence gathering"**:
+1. `evalkit/goal/README.md` — table of the 9-step pipeline
+2. `evalkit/goal/docs/R10.1_walkthrough.md` — one real requirement traced through all 9 steps
+3. `evalkit/goal/DESIGN.md` — design rationale and rejected alternatives
 
 **Want to add a new checker or a new direction**:
 1. `CONTRIBUTING.md`
 2. `evalkit/rule/README.md` (implementation of the current 7 checkers)
-3. `eval-agent/directions/README.md` (direction concept + how to add one)
+3. `evalkit/goal/directions/README.md` (direction concept + how to add one)
 
 **Want to install the hook collector**:
 1. `hooks/README.md` — capabilities, format, overhead, uninstall
@@ -82,7 +82,7 @@
 ## Common misconceptions
 
 - **"I have to install hooks to use this"** ❌ — no. By default we read Kiro's own session records (`--official`). Hooks are an optional plugin.
-- **"evalkit and eval-agent are either/or"** ❌ — they share the same normalization layer. Both can evaluate the same session; their verdicts are complementary perspectives.
+- **"evalkit and goal are either/or"** ❌ — they share the same normalization layer. Both can evaluate the same session; their verdicts are complementary perspectives.
 - **"Adding a new evaluation subject requires patching the engine"** ❌ — add a subject by writing one `rules/<x>.checks.json`. The engine stays untouched.
 - **"LLMJudge is required"** ❌ — it's the optional 8th checker, active only with `--llm`. The core 7 checkers make zero LLM calls.
 
@@ -100,7 +100,7 @@ python3 -m rule.runner rules/example-minimal.checks.json examples/sample.normali
 # 3. Run the unit tests to confirm your environment is OK
 python3 -m unittest discover -s normalize/tests -t .            # 117 tests
 python3 -m unittest discover -s rule/tests -t .           # 65 tests
-cd ../eval-agent && python3 -m unittest discover -s tests -t .  # 59 tests
+cd ../goal && python3 -m unittest discover -s tests -t .  # 59 tests
 
 # 4. Grab one of your own Kiro session IDs and evaluate it
 # First, inspect its action sequence:

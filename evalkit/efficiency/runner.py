@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 
-import _bootstrap  # noqa: F401
 
 from evidence.loader import load_run_tree
 

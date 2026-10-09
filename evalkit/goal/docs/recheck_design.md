@@ -407,7 +407,7 @@ Before each phase concludes, **run A/B comparisons on several real archives** (w
 ## 10. New code modules needed
 
 ```
-eval-agent/
+evalkit/goal/
 ├── recheck/
 │   ├── __init__.py
 │   ├── tools.py           # dispatch + validator + handler for 4 tools
