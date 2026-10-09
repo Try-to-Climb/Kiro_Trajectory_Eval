@@ -10,7 +10,7 @@ A rule file = one subject-under-test's "expected trajectory", named `<subject>.c
 |------|---------|
 | `example-minimal.checks.json` | Minimal starter: 3 checks; copy and adapt |
 | `example-all-checkers.checks.json` | Demo of all 7 checkers; each has a `_comment` annotation |
-| `agent-eval.checks.json` + `agent-eval.README.md` | A real subject (the GuardEval orchestrator) |
+| `agent-eval.checks.json` + `agent-eval.README.md` | A real subject (an evaluation orchestrator) |
 
 > JSON does not support comments, but the runner only reads `checks[]`; any key beginning with `_` (`_doc`/`_comment`) is ignored and can be used as a comment.
 

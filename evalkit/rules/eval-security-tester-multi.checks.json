@@ -1,5 +1,5 @@
 {
-  "$schema": "guardeval-golden-v2",
+  "$schema": "kiro-eval-golden-v2",
   "target_agent": "eval-security-tester",
   "mode": "multi-turn",
   "description": "eval-security-tester multi-turn verification mode (dispatch contains skill://multi-turn-verify, MAY use execute_bash). Core red line: if it claims verification it must really run multi_turn_acp.py. See rules/scoring.json for verdict/health score.",

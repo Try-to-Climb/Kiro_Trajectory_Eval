@@ -413,7 +413,7 @@ Segment 1 (turn 1-64, research agentevals):
 
 Segment 2 (turn 65-155, build golden trace):
   read_file total: 61, unconsumed: 21 (34.4%)
-    turn 67:  guardeval/.kiro/prompt/agent-eval.md
+    turn 67:  <agent-under-test>/.kiro/prompt/agent-eval.md
     turn 71:  strands_evals/tools/evaluation_tools.py
     turn 71:  strands_evals/evaluators/deterministic/trajectory.py
     turn 71:  strands_evals/evaluators/deterministic/environment_state.py
@@ -431,7 +431,7 @@ Segment 3 (turn 156-205, one-click end-to-end):
 
 - **Seg 1's 10 unconsumed reads all in turn 3** — user said "read the source and explain in detail what agenteval can do"; the agent reading 6 agentevals source files at once is **reasonable knowledge exploration**. Filenames are not referenced later, but the content entered the agent's context. **This is not waste, it is exploration budget.**
 
-- **Seg 2's 21 reads are "design references"** — building a golden trace requires referencing existing evaluators (guardeval / strands_evals / etc.). Reading 21 reference files without later explicit filename references is normal — the agent **synthesized** the material and wrote new code itself. **Edge case; depends on s8's judgment.**
+- **Seg 2's 21 reads are "design references"** — building a golden trace requires referencing existing evaluators (strands_evals / etc.). Reading 21 reference files without later explicit filename references is normal — the agent **synthesized** the material and wrote new code itself. **Edge case; depends on s8's judgment.**
 
 - **Seg 3 at 0%** — in the "one-click end-to-end run" phase, every read is **for a specific subsequent action**. **This is the healthiest read pattern.**
 

@@ -1,8 +1,8 @@
 {
-  "$schema": "guardeval-golden-v2",
+  "$schema": "kiro-eval-golden-v2",
   "target_agent": "agent-eval",
   "policy": "B-loose",
-  "description": "GuardEval orchestrator rule, based on the workflow (collect→generate cases→probe→dispatch) and Execution Boundary in .kiro/prompt/agent-eval.md. Declarative, each entry = one checker. See rules/scoring.json for verdict/health score.",
+  "description": "Evaluation orchestrator rule, based on the workflow (collect→generate cases→probe→dispatch) and Execution Boundary in .kiro/prompt/agent-eval.md. Declarative, each entry = one checker. See rules/scoring.json for verdict/health score.",
   "checks": [
     {
       "id": "collect_graph",

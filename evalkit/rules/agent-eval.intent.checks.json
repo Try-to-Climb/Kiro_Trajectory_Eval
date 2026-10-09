@@ -1,5 +1,5 @@
 {
-  "$schema": "guardeval-golden-v2",
+  "$schema": "kiro-eval-golden-v2",
   "target_agent": "agent-eval",
   "policy": "B-loose",
   "description": "[Structured-intent] version of the agent-eval rule (equivalent to agent-eval.checks.json). Uses reads/runs/write/dispatches/pipeline/never_* to describe expectations, no hand-written type/regex. CPN1 needs multi-tool regex in exclude, so the low-level type form is retained as an escape-hatch example.",

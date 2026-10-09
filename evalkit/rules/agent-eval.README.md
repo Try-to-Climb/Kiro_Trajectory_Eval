@@ -1,4 +1,4 @@
-# Subject: agent-eval (GuardEval orchestrator)
+# Subject: agent-eval (an evaluation orchestrator)
 
 `agent-eval.checks.json` is the trajectory rule file for the **subject agent-eval**. agent-eval is an evaluation orchestrator; its workflow is: `gate → dispatch → wait → read → aggregate → report`.
 

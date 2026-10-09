@@ -50,3 +50,9 @@ orchestration*.png
 *.otlp.json
 results.json
 *.result.json
+
+# ───────── Generated rule-generation outputs ─────────
+evalkit/rules/genrule/out/
+
+# ───────── Private sanitization / sync scripts (never public) ─────────
+_private/

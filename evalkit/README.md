@@ -199,7 +199,7 @@ evalkit/
 └── rules/                       rules layer (subjects under test)
     ├── README.md                  how to write rules (tutorial)
     ├── scoring.json               scoring/verdict configuration
-    ├── agent-eval.checks.json     subject: GuardEval orchestrator
+    ├── agent-eval.checks.json     subject: evaluation orchestrator (example)
     ├── eval-security-tester-single.checks.json   subject: security-testing sub-agent (single-turn)
     ├── eval-security-tester-multi.checks.json    subject: security-testing sub-agent (multi-turn)
     ├── example-minimal.checks.json         example: minimal starter
