@@ -1,26 +1,27 @@
 """Trajectory checker library.
 
-Design (finalized with the user, item by item):
-  - matcher supports both field matching and regex: only keys present in a spec
-    are checked (AND). Discrete fields action/tool/pattern use equality;
-    path/command/root use substring containment; regex searches the serialized
-    string form of the action. Fields and regex can be mixed (fields narrow the
-    scope first, then regex extracts details).
+Design (nailed down point by point with the user):
+  - A matcher supports field matching and regex at the same time: whichever
+    keys you write in a spec are the ones checked (AND).
+    Discrete fields action/tool/pattern use equality; path/command/root use
+    containment; regex searches over the serialized form of the action. Fields
+    and regex can be mixed (fields narrow the scope first, regex picks out
+    the detail).
   - Every checker returns a uniform CheckResult (score + passed + reason +
-    evidence), borrowing strands EvaluationOutput's triple but adding evidence
-    (matched action idx).
-  - Checkers have single, composable responsibilities:
-      Exists     single action existence (unordered)
-      Count      occurrence-count interval
-      Forbidden  must not appear (with exclude to suppress false positives)
-      Before     partial order between two actions (one pair)
+    evidence); patterned on Strands' EvaluationOutput triple, with `evidence`
+    (hit action idxs) added.
+  - Checkers have single responsibilities and compose:
+      Exists     a single action exists (unordered)
+      Count      number of occurrences falls in an interval
+      Forbidden  must not appear (with `exclude` to drop false hits)
+      Before     partial order over two actions (focused on one pair)
       Milestone  order-preserving subsequence across the trajectory (anything
-                 in between is ignored, progress score emitted; plan A: only
-                 forward direction is enforced)
+                 may interleave; emits a progress score; variant A judges
+                 forward only)
       IfThen     if a appears then b must appear (conditional implication,
-                 ignoring order)
-  - Continuous scoring is inspired by strands, but counting uses rigorous
-    logic; we do not copy its zip-truncation / set-dedup implementation.
+                 order-independent)
+  - Continuous scoring borrows the idea from Strands, but counts with strict
+    logic rather than copying its zip-truncate / set-dedup implementation.
 """
 
 from __future__ import annotations
@@ -40,9 +41,9 @@ class CheckResult:
     checker: str
     severity: str                 # required / recommended / forbidden / optional
     passed: bool
-    score: float                  # 0.0~1.0
+    score: float                  # 0.0 ~ 1.0
     reason: str
-    evidence: list[int] = field(default_factory=list)   # related action idx
+    evidence: list[int] = field(default_factory=list)   # related action idxs
     confidence: float = 1.0        # deterministic checkers are always 1.0; LLMJudge uses this to express confidence
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,12 +56,12 @@ class CheckResult:
 
 
 def _serialize(action: dict) -> str:
-    """Stitch an action into a regex-searchable string.
+    """Assemble an action into a regex-searchable string.
 
-    Fields are joined by newlines (not spaces): regex `.` does not cross lines
-    by default, avoiding false matches from "tail of previous field + head of
-    next field" being concatenated into an adjacent substring (B7). Within-
-    field matching is unaffected.
+    Fields are joined by newlines rather than spaces: `.` in regex does not
+    cross newlines by default, which prevents "tail of previous field + head
+    of next field" from being read as an adjacent substring and giving a
+    spurious match (B7). Within-field matching is unaffected.
     """
     parts = [str(action.get(k, "") or "") for k in
              ("action", "tool", "command", "path", "root", "pattern")]
@@ -68,11 +69,11 @@ def _serialize(action: dict) -> str:
 
 
 def match(action: dict, spec: dict) -> bool:
-    """Check whether an action matches a spec. Only keys present are checked;
-    all must be satisfied to match.
+    """Decide whether an action matches a spec. Only keys that were written
+    are checked, and all of them must be satisfied for a hit.
 
-    Illegal regex does not crash: returns False (the real error is raised in
-    run_check's validation gate; this is only a defensive fallback).
+    Illegal regex does not crash: returns False (the real error is raised
+    during run_check's validation phase; this is only defensive).
     """
     for k in _EQ_FIELDS:
         if k in spec and action.get(k) != spec[k]:
@@ -89,9 +90,10 @@ def match(action: dict, spec: dict) -> bool:
         except re.error:
             return False
     if "program" in spec:
-        # Match by "invoked program": some subcommand (after whitespace strip)
-        # must match this regex from its start. The `program` regex is emitted
-        # by the DSL and already consumes optional prefixes (timeout/sudo/...).
+        # Match on "the program that got invoked": one of the subcommands
+        # (after whitespace trimming) must match the regex from its head.
+        # The `program` regex is generated by the DSL and already consumes
+        # optional prefixes (timeout / sudo / ...).
         subs = action.get("subcommands") or (
             [action["command"]] if action.get("command") else [])
         try:
@@ -100,13 +102,13 @@ def match(action: dict, spec: dict) -> bool:
                 return False
         except re.error:
             return False
-    # A completely empty spec matches nothing (guard against accidental configs).
+    # A completely empty spec matches nothing (prevents accidental hits).
     return any(k in spec for k in (*_EQ_FIELDS, *_CONTAINS_FIELDS, "regex", "program"))
 
 
 def _find(actions: list[dict], spec: dict) -> list[int]:
-    """Return idx of all actions matching spec (in order of occurrence). If an
-    action lacks idx, fall back to its list position (B2)."""
+    """Return the idxs of all actions matching the spec, in order of occurrence.
+    If an action has no idx, fall back to the list position (B2)."""
     return [a.get("idx", i) for i, a in enumerate(actions) if match(a, spec)]
 
 
@@ -120,7 +122,7 @@ def check_exists(cp: dict, actions: list[dict]) -> CheckResult:
     return CheckResult(
         cp["id"], "Exists", cp.get("severity", "required"), ok,
         1.0 if ok else 0.0,
-        cp.get("reason_tmpl") or (f"action appeared (idx={hits[0]})" if ok else "expected action did not appear"),
+        cp.get("reason_tmpl") or (f"action occurred (idx={hits[0]})" if ok else "expected action did not occur"),
         hits[:5],
     )
 
@@ -134,7 +136,7 @@ def check_count(cp: dict, actions: list[dict]) -> CheckResult:
     return CheckResult(
         cp["id"], "Count", cp.get("severity", "required"), ok,
         1.0 if ok else 0.0,
-        cp.get("reason_tmpl") or f"appeared {n} times, expected interval {bound}",
+        cp.get("reason_tmpl") or f"occurred {n} times, expected in {bound}",
         hits[:10],
     )
 
@@ -145,14 +147,14 @@ def check_forbidden(cp: dict, actions: list[dict]) -> CheckResult:
     for a in actions:
         if not match(a, cp["match"]):
             continue
-        if excl and match(a, excl):   # matched exclude -> not a violation
+        if excl and match(a, excl):   # hits the exclude -> not a violation
             continue
         hits.append(a["idx"])
-    ok = len(hits) == 0            # forbidden: pass only when nothing matched
+    ok = len(hits) == 0            # forbidden: pass means no hits
     return CheckResult(
         cp["id"], "Forbidden", cp.get("severity", "forbidden"), ok,
         1.0 if ok else 0.0,
-        cp.get("reason_tmpl") or ("no forbidden action appeared" if ok else f"forbidden action appeared (idx={hits})"),
+        cp.get("reason_tmpl") or ("forbidden action did not occur" if ok else f"forbidden action occurred (idx={hits})"),
         hits[:5],
     )
 
@@ -161,25 +163,25 @@ def check_before(cp: dict, actions: list[dict]) -> CheckResult:
     a_hits = _find(actions, cp["a"])
     b_hits = _find(actions, cp["b"])
     if not a_hits or not b_hits:
-        # If either side is missing, partial order is meaningless -> treat as
-        # pass (existence is guaranteed separately by Exists).
+        # Either side missing: partial order is meaningless; treat as pass
+        # (existence should be enforced separately with Exists).
         return CheckResult(
             cp["id"], "Before", cp.get("severity", "required"), True, 1.0,
-            cp.get("reason_tmpl") or "a or b did not both appear; partial order not applicable", [])
+            cp.get("reason_tmpl") or "a or b did not both appear; partial order N/A", [])
     ok = min(a_hits) < min(b_hits)
     return CheckResult(
         cp["id"], "Before", cp.get("severity", "required"), ok,
         1.0 if ok else 0.0,
         cp.get("reason_tmpl") or
-        (f"a(idx={min(a_hits)}) precedes b(idx={min(b_hits)})" if ok
-         else f"wrong order: a(idx={min(a_hits)}) did not precede b(idx={min(b_hits)})"),
+        (f"a (idx={min(a_hits)}) precedes b (idx={min(b_hits)})" if ok
+         else f"ordering violated: a (idx={min(a_hits)}) does not precede b (idx={min(b_hits)})"),
         [min(a_hits), min(b_hits)],
     )
 
 
 def check_milestone(cp: dict, actions: list[dict]) -> CheckResult:
-    """Order-preserving subsequence: advance a pointer through steps in order;
-    anything in between is ignored."""
+    """Order-preserving subsequence: advance a pointer across `steps` in
+    order, with any interleaving actions ignored."""
     steps = cp["steps"]
     idx = 0
     reached: list[int] = []
@@ -197,60 +199,61 @@ def check_milestone(cp: dict, actions: list[dict]) -> CheckResult:
         reason = f"stopped at milestone {idx}/{total} (remaining ones did not appear in order)"
     return CheckResult(
         cp["id"], "Milestone", cp.get("severity", "required"), ok, score,
-        cp.get("reason_tmpl", "") + (f" — {reason}" if cp.get("reason_tmpl") else reason),
+        cp.get("reason_tmpl", "") + (f" - {reason}" if cp.get("reason_tmpl") else reason),
         reached,
     )
 
 
-# Produce-style actions: represent the agent truly writing files via a tool.
-# Scripts writing files inside run_command are invisible to the hook (no
-# corresponding action), so Produces only recognizes tool-level outputs. Users
-# should target "key artifacts written via write tools" (like
-# test_cases_*.json, report_*.md), not the small files a script batch-creates.
+# Produce-type actions: these represent files the agent actually wrote via a
+# tool. Files written from inside a shell script (`run_command`) are invisible
+# to the hook (no corresponding action), so Produces only sees tool-level
+# writes. Users should pin "key artefacts produced via the write tool"
+# (e.g. test_cases_*.json, report_*.md) rather than shards generated by scripts.
 PRODUCE_ACTIONS = ("create_file", "modify_file", "write", "append_file")
 
 
 def check_produces(cp: dict, actions: list[dict]) -> CheckResult:
-    """Produce check: user writes only the artifact name, and this auto-matches
-    any produce-style action whose path contains that name.
+    """Produce check: the user writes just a product name (`name`) and the
+    checker automatically matches any produce-type action whose path contains
+    that name.
 
-    Check spec examples:
+    Rule shapes:
         {"id":"...","type":"Produces","name":"test_cases_security"}
         {"id":"...","type":"Produces","name":"report_", "min_count":4}   # at least 4 reports
-    name is substring-matched against path; optional min_count (default 1).
+    `name` is a substring match against path; `min_count` defaults to 1.
     """
     name = cp.get("name", "")
     lo = cp.get("min_count", 1)
     hits = [a.get("idx", i) for i, a in enumerate(actions)
             if a.get("action") in PRODUCE_ACTIONS
             and name in (a.get("path") or "")
-            and a.get("completed", True) is not False]   # N7: not completed (completed=False) doesn't count as produced
+            and a.get("completed", True) is not False]   # N7: incomplete writes (completed=False) do not count as produced
     ok = len(hits) >= lo
     return CheckResult(
         cp["id"], "Produces", cp.get("severity", "required"), ok,
         1.0 if ok else 0.0,
         cp.get("reason_tmpl") or
-        (f"produced '{name}' x {len(hits)} (need >= {lo})" if ok
-         else f"did not produce '{name}' (need >= {lo}, actual {len(hits)}; note: files written by scripts are invisible to the hook)"),
+        (f"produced '{name}' x {len(hits)} (needed >={lo})" if ok
+         else f"did not produce '{name}' (needed >={lo}, got {len(hits)}; note: files written from inside scripts are invisible to the hook)"),
         hits[:10],
     )
 
 
 def check_ifthen(cp: dict, actions: list[dict]) -> CheckResult:
-    """If a appears then b must appear (unordered). If a does not appear, this
-    is vacuously true."""
+    """If a appears then b must appear (order-independent). If a never appears
+    the rule is vacuously true."""
     a_hits = _find(actions, cp["a"])
     if not a_hits:
         return CheckResult(
             cp["id"], "IfThen", cp.get("severity", "required"), True, 1.0,
-            cp.get("reason_tmpl") or "premise action did not appear; condition not triggered", [])
+            cp.get("reason_tmpl") or "premise action did not appear; rule did not fire", [])
     b_hits = _find(actions, cp["b"])
     ok = len(b_hits) > 0
     return CheckResult(
         cp["id"], "IfThen", cp.get("severity", "required"), ok,
         1.0 if ok else 0.0,
         cp.get("reason_tmpl") or
-        (f"a appeared and b also appeared (idx={b_hits[0]})" if ok
+        (f"a appeared and b appeared (idx={b_hits[0]})" if ok
          else f"a appeared (idx={a_hits[0]}) but required b is missing"),
         a_hits[:3] + b_hits[:3],
     )
@@ -269,7 +272,7 @@ CHECKERS = {
 
 _VALID_SEVERITY = {"required", "recommended", "forbidden", "optional"}
 
-# Required keys per checker type
+# Required keys per checker type.
 _REQUIRED_KEYS = {
     "Exists": ["match"], "Count": ["match"], "Forbidden": ["match"],
     "Before": ["a", "b"], "Milestone": ["steps"], "IfThen": ["a", "b"],
@@ -278,8 +281,8 @@ _REQUIRED_KEYS = {
 
 
 def _collect_regexes(cp: dict) -> list[str]:
-    """Collect every regex in a rule (match/a/b/exclude/steps[]) for pre-flight
-    validity checks."""
+    """Collect every regex inside a rule (match / a / b / exclude / steps[]),
+    used for legality pre-check."""
     out = []
     def grab(spec):
         if isinstance(spec, dict) and isinstance(spec.get("regex"), str):
@@ -292,35 +295,35 @@ def _collect_regexes(cp: dict) -> list[str]:
 
 
 def _validate(cp: dict) -> Optional[str]:
-    """Return an error description; None means the rule is valid."""
+    """Return an error message; None means the rule is valid."""
     t = cp.get("type")
     if t not in CHECKERS and t != "LLMJudge":
         return f"unknown checker type: {t}"
     for k in _REQUIRED_KEYS.get(t, []):
         if k not in cp:
-            return f"{t} missing required key '{k}'"
+            return f"{t} is missing required key '{k}'"
     if t == "LLMJudge":
         from . import llm_judge
         if cp["dimension"] not in llm_judge.RUBRICS:
-            return f"unknown judge dimension '{cp['dimension']}' (available: {llm_judge.available_dimensions()})"
+            return f"rule error: unknown judge dimension '{cp['dimension']}' (available: {llm_judge.available_dimensions()})"
         thr = cp.get("pass_threshold", 0.75)
         if not isinstance(thr, (int, float)) or not 0 <= thr <= 1:
             return f"pass_threshold must be in [0,1], got {thr!r}"
     if t == "Milestone" and not (isinstance(cp.get("steps"), list) and cp["steps"]):
-        return "Milestone steps must be a non-empty list"
+        return "Milestone's steps must be a non-empty list"
     if t == "Produces" and not cp.get("name"):
-        return "Produces name must be non-empty (otherwise it would match all outputs)"
+        return "Produces requires a non-empty name (otherwise it would match every produce)"
     if t == "Count":
         if cp.get("min_count") is None and cp.get("max_count") is None:
-            return "Count must have at least one of min_count or max_count"
+            return "Count requires at least one of min_count or max_count"
         if cp.get("max_count") is None and (cp.get("min_count") or 0) <= 0:
-            return "Count lower bound is 0 and no upper bound -> always passes, meaningless (set min_count>=1 or add max_count)"
+            return "Count has a lower bound of 0 and no upper bound -> always passes, meaningless (set min_count>=1 or add max_count)"
     for k in ("min_count", "max_count"):
         v = cp.get(k)
         if v is not None and (not isinstance(v, int) or v < 0):
             return f"{k} must be a non-negative integer, got {v!r}"
     if cp.get("severity") is not None and cp["severity"] not in _VALID_SEVERITY:
-        return f"unknown severity '{cp['severity']}' (must be {sorted(_VALID_SEVERITY)})"
+        return f"unknown severity '{cp['severity']}' (expected one of {sorted(_VALID_SEVERITY)})"
     for rx in _collect_regexes(cp):
         try:
             re.compile(rx)
@@ -330,12 +333,12 @@ def _validate(cp: dict) -> Optional[str]:
 
 
 def run_check(cp: dict, actions: list[dict], context: Optional[dict] = None) -> CheckResult:
-    # Intent compilation failed -> raise error visibly
+    # Intent compilation failed -> surface the error.
     if cp.get("type") == "__dsl_error__":
         return CheckResult(cp.get("id", "?"), "DSL", "required", False, 0.0,
                            f"rule error: {cp.get('_msg', 'intent compilation failed')}", [])
-    # Rule is invalid -> return a "failing and visible" result (severity forced
-    # to required so it neither silently passes nor crashes).
+    # Invalid rule -> return a visible failure (severity defaults to required
+    # so it neither silently passes nor crashes).
     err = _validate(cp)
     if err is not None:
         sev = cp.get("severity")
@@ -346,16 +349,17 @@ def run_check(cp: dict, actions: list[dict], context: Optional[dict] = None) -> 
         return _run_llm_judge(cp, actions, context or {})
     try:
         return CHECKERS[cp["type"]](cp, actions)
-    except Exception as e:   # runtime fallback so a single checker cannot crash the whole run
+    except Exception as e:   # runtime safety net; a single checker must not crash the whole run
         return CheckResult(cp.get("id", "?"), cp.get("type") or "?",
                            cp.get("severity", "required"), False, 0.0,
-                           f"checker runtime error: {e!r}", [])
+                           f"checker crashed: {e!r}", [])
 
 
 def _run_llm_judge(cp: dict, actions: list[dict], context: dict) -> CheckResult:
-    """LLMJudge: advisory scoring. No backend / any error -> non-penalizing
-    pass (confidence=0). Only when the LLM actually runs and the score is
-    below threshold is the result marked not passed."""
+    """LLMJudge: advisory scoring. When there is no backend or the call
+    errors, pass **non-punitively** (confidence=0); only mark not-passed when
+    the LLM actually ran and the score is below the threshold.
+    """
     from . import llm_judge
     from normalize.judge_view import build_view_from_actions
     cid = cp.get("id", "?")
@@ -365,12 +369,12 @@ def _run_llm_judge(cp: dict, actions: list[dict], context: dict) -> CheckResult:
     caller = context.get("llm_caller")
     if caller is None:
         return CheckResult(cid, "LLMJudge", sev, True, 0.0,
-                           f"LLM judge[{dim}] not run (no backend / not enabled)", [], confidence=0.0)
+                           f"LLM judge[{dim}] did not run (no backend / not enabled)", [], confidence=0.0)
     view = build_view_from_actions(actions)
     res = llm_judge.judge(dim, context.get("objective", ""), view, caller=caller)
     if "error" in res:
         return CheckResult(cid, "LLMJudge", sev, True, 0.0,
-                           f"LLM judge[{dim}] error: {res['error']}", [], confidence=0.0)
+                           f"LLM judge[{dim}] errored: {res['error']}", [], confidence=0.0)
     score01 = res["score"] / 4.0
     return CheckResult(cid, "LLMJudge", sev, score01 >= thr, score01,
                        f"[{dim} {res['score']}/4] {res['justification']}", [], confidence=0.9)

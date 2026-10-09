@@ -1,4 +1,4 @@
-"""Structured intent rule desugar compiler tests."""
+"""Tests for the structured-intent desugar compiler."""
 import json
 import os
 import tempfile
@@ -13,24 +13,24 @@ class TestGlob(unittest.TestCase):
     def test_glob(self):
         self.assertEqual(glob_to_regex("*.json"), r".*\.json")
         self.assertEqual(glob_to_regex("a?b"), r"a.b")
-        self.assertEqual(glob_to_regex("timeout *"), r"timeout\ .*")  # space escaped (harmless)
+        self.assertEqual(glob_to_regex("timeout *"), r"timeout\ .*")  # whitespace is escaped (harmless)
 
 
 class TestDesugar(unittest.TestCase):
     def test_passthrough_raw(self):
         raw = {"id": "x", "type": "Exists", "match": {"action": "read_file"}}
-        self.assertIs(desugar_check(raw), raw)          # rules with type are passed through verbatim
+        self.assertIs(desugar_check(raw), raw)          # rules with explicit type are passed through verbatim
 
     def test_reads_mechanism_agnostic(self):
         d = desugar_check({"reads": "*.kiro/agents/*.json", "importance": "recommended"})
         self.assertEqual(d["type"], "Exists")
-        self.assertNotIn("action", d["match"])          # not bound to read_file -> cat also counts
+        self.assertNotIn("action", d["match"])          # not bound to read_file -- shell cat also counts
         self.assertIn("regex", d["match"])
 
     def test_runs(self):
         d = desugar_check({"runs": "kiro-cli chat --agent *"})
         self.assertEqual(d["match"]["action"], "run_command")
-        self.assertIn("program", d["match"])          # runs uses program (match at subcommand head)
+        self.assertIn("program", d["match"])          # runs uses `program` (matched at subcommand head)
         self.assertIn("kiro", d["match"]["program"])
 
     def test_write_to_produces(self):
@@ -47,18 +47,18 @@ class TestDesugar(unittest.TestCase):
 
     def test_dispatches_at_most_allows_zero(self):
         d = desugar_check({"dispatches": "eval-*", "at_most": 2})
-        self.assertEqual(d["min_count"], 0)      # only at_most given -> allow 0 times
+        self.assertEqual(d["min_count"], 0)      # at_most alone -> allow 0 occurrences
         self.assertEqual(d["max_count"], 2)
 
     def test_dispatches_default_requires_one(self):
         d = desugar_check({"dispatches": "*"})
-        self.assertEqual(d["min_count"], 1)      # neither given -> must dispatch
+        self.assertEqual(d["min_count"], 1)      # neither given -> dispatch is mandatory
 
     def test_pipeline_milestone(self):
         d = desugar_check({"pipeline": ["reads graph", "runs probe", "dispatches *"]})
         self.assertEqual(d["type"], "Milestone")
         self.assertEqual(len(d["steps"]), 3)
-        self.assertEqual(d["steps"][1]["action"], "run_command")   # runs -> run_command
+        self.assertEqual(d["steps"][1]["action"], "run_command")   # runs → run_command
         self.assertEqual(d["steps"][2], {"action": "spawn_subagent"})  # dispatches * -> any spawn
 
     def test_before(self):
@@ -68,7 +68,7 @@ class TestDesugar(unittest.TestCase):
         self.assertEqual(d["b"]["action"], "run_command")
 
     def test_never_runs_forbidden(self):
-        d = desugar_check({"never_runs": "rm -rf /", "as": "forbid dangerous commands"})
+        d = desugar_check({"never_runs": "rm -rf /", "as": "forbid dangerous command"})
         self.assertEqual(d["type"], "Forbidden")
         self.assertEqual(d["severity"], "forbidden")           # never_* is always forbidden
         self.assertEqual(d["match"]["action"], "run_command")
@@ -90,7 +90,7 @@ class TestDesugar(unittest.TestCase):
         ]
         for a in caught:
             self.assertFalse(run_check(cp, [a]).passed, a)      # all should be caught (violation)
-        # Read-only does not count as write; writes inside scripts (path not in command) are missed -- known blind spot
+        # plain reads are not writes; writes inside scripts (path not in command) are missed -- known blind spot
         self.assertTrue(run_check(cp, [cmd("cat secret.json")]).passed)
         self.assertTrue(run_check(cp, [cmd("python3 gen.py")]).passed)
 
@@ -114,7 +114,7 @@ class TestDesugar(unittest.TestCase):
 
 
 class TestEndToEnd(unittest.TestCase):
-    """Intent rules run on synthetic actions, verify correct judgment after compile."""
+    """Run intent rules against synthetic actions and verify the compiled rules decide correctly."""
     def _acts(self):
         return [
             {"idx": 0, "action": "run_command", "tool": "shell",
@@ -127,7 +127,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_intent_rule_runs(self):
         spec = {"target_agent": "demo", "checks": [
-            {"reads": "*.kiro/agents/*.json", "importance": "required", "as": "read config (cat also counts)"},
+            {"reads": "*.kiro/agents/*.json", "importance": "required", "as": "read config (cat counts)"},
             {"runs": "kiro-cli chat --agent *", "importance": "required", "as": "probe"},
             {"dispatches": "eval-*", "at_least": 1, "as": "dispatch"},
             {"never_runs": "rm -rf /", "as": "forbid dangerous"},
@@ -136,15 +136,15 @@ class TestEndToEnd(unittest.TestCase):
             p = os.path.join(d, "r.json")
             json.dump(spec, open(p, "w"))
             out = run(p, self._acts())
-        self.assertEqual(out["verdict"], "PASS")           # first three hit, forbidden not violated
+        self.assertEqual(out["verdict"], "PASS")           # first three hit; forbidden rule not violated
         self.assertEqual(out["health"], 1.0)
-        # reads hits via cat (mechanism agnostic)
+        # reads hits via cat (mechanism-independent)
         reads = [r for r in out["results"] if r["checkpoint_id"].startswith("reads_")][0]
         self.assertTrue(reads["passed"])
 
 
 class TestReadsPrecisionVsTouches(unittest.TestCase):
-    """reads only matches real reads (excludes write/delete/mention); touches matches any occurrence."""
+    """reads only recognises true reads (excludes writes/deletes/mentions); touches recognises any appearance."""
     from rule.checkers import match as _m
 
     def _match(self, intent, action):
@@ -183,7 +183,7 @@ class TestReadsPrecisionVsTouches(unittest.TestCase):
 
 
 class TestRunsProgram(unittest.TestCase):
-    """runs matches at subcommand head (strip prefixes); excludes mentions/substrings."""
+    """runs matches at subcommand head (prefixes stripped), excludes mentions/substrings."""
     def _match(self, intent, cmd):
         from rule.rules_dsl import desugar_check
         from rule.checkers import match
@@ -196,9 +196,9 @@ class TestRunsProgram(unittest.TestCase):
             self.assertTrue(self._match({"runs": "pytest*"}, cmd), cmd)
 
     def test_excludes_mention_and_substring(self):
-        self.assertFalse(self._match({"runs": "pytest*"}, "echo 'run pytest later'"))
+        self.assertFalse(self._match({"runs": "pytest*"}, "echo 'will run pytest later'"))
         self.assertFalse(self._match({"runs": "pytest*"}, "git commit -m 'run pytest'"))
-        self.assertFalse(self._match({"runs": "ls"}, "make build-tools"))  # ls is inside tools
+        self.assertFalse(self._match({"runs": "ls"}, "make build-tools"))  # ls appears inside the word "tools"
 
     def test_probe_with_timeout_prefix(self):
         self.assertTrue(self._match({"runs": "kiro-cli chat*--agent*"},
@@ -213,7 +213,7 @@ class TestIntentMapEditable(unittest.TestCase):
         self.assertIn("read_file", m["read_actions"])
 
     def test_custom_verb_via_map(self):
-        # User adds python3 into the mapping -> reads now recognizes python-based reads
+        # user adds python3 to the map -> reads then recognises python reads
         import tempfile, os, json
         from rule.rules_dsl import load_intent_map, reads_regex, _map
         import rule.rules_dsl as dsl

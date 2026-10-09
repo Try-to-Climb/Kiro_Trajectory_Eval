@@ -1,4 +1,4 @@
-"""Declarative intent rules -> compiler (desugar) targeting the 7 low-level checkers.
+"""Structured intent rules -> compiler (desugar) targeting the 7 low-level checkers.
 
 Users write "intents" (reads/runs/write/dispatches/pipeline/before/never_*/
 if_claims...then_*/judge); this module compiles them into low-level check
@@ -6,14 +6,14 @@ dicts that the existing checkers understand, and hands them to the engine.
 
 Design points:
   - **Non-destructive**: a rule that already carries `type` is passed through
-    unchanged (advanced users / low-level rules keep working).
-  - **Mechanism-agnostic**: `reads` compiles into a "pure regex Exists" (not
-    bound to read_file); a shell `cat` also counts -- welding shut a hole we
-    stepped in before, so users can't write it wrong.
-  - **glob replaces regex**: `*` -> anything, `?` -> single char; users never
-    touch backslashes. `regex:` is kept as an escape hatch.
-  - **Visible failure**: unrecognized intents compile into __dsl_error__ so
-    run_check raises the error visibly, never silently.
+    verbatim (power users / low-level rules keep working).
+  - **Mechanism-agnostic**: `reads` compiles to a "pure regex Exists"
+    (not bound to read_file), so shell `cat` counts too — the pitfall we
+    kept hitting is sealed in; a user cannot write it.
+  - **glob instead of regex**: `*` -> any, `?` -> single char; the user never
+    touches backslashes. The `regex:` escape hatch is preserved.
+  - **Visible failure**: an unrecognised intent compiles to __dsl_error__,
+    which run_check reports explicitly rather than silently.
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ from typing import Any
 
 _SEV = {"required", "recommended", "forbidden", "optional"}
 
-# -- intent -> action mapping (overridable via rules/intent_map.json, user-editable) --
+# -- intent -> action/verb map (can be overridden by rules/intent_map.json;
+#    editable by users) --
 _DEFAULT_MAP = {
     "read_actions": ["read_file", "list_dir", "read_image", "search_content", "search_files"],
     "read_shell_verbs": ["cat", "bat", "sed", "awk", "grep", "egrep", "rg", "head", "tail",
@@ -46,8 +47,8 @@ _MAP_CACHE: dict | None = None
 
 
 def load_intent_map(path: str | None = None) -> dict:
-    """Load the intent-to-action map: rules/intent_map.json overrides the
-    built-in defaults; if missing/corrupt, fall back to defaults."""
+    """Load the intent->action/verb map: rules/intent_map.json overrides the
+    built-in defaults; missing or malformed falls back to defaults."""
     p = path or _MAP_PATH
     m = dict(_DEFAULT_MAP)
     try:
@@ -68,8 +69,8 @@ def _map() -> dict:
 
 
 def glob_to_regex(g: str) -> str:
-    """glob -> regex (unanchored, meant for re.search). `*` -> `.*`, `?` -> `.`,
-    everything else is escaped."""
+    """glob -> regex (unanchored, used with re.search). `*` -> `.*`,
+    `?` -> `.`, everything else escaped."""
     out = []
     for ch in g:
         if ch == "*":
@@ -86,34 +87,34 @@ def _slug(s: str) -> str:
 
 
 def reads_regex(target_glob: str) -> str:
-    """Build the regex for "read target" (based on the editable map):
-       1. read-semantic actions (read_file/list_dir/...) mention target; or
-       2. run_command uses a read-verb (cat/grep/...) touching target; or
-       3. the command contains both a "read idiom" (json.load / .read() /
-          open(single arg)) and the target.
-    Excludes writes (create/modify/open(...,'w')), deletes, and mere mentions.
+    """Build the "read `target`" regex (uses the editable map):
+       (1) a read-type semantic action (read_file/list_dir/...) mentions target; or
+       (2) run_command uses a read verb (cat/grep/...) touching target; or
+       (3) the command contains both a "read idiom" (json.load/.read()/
+           open(single arg)) and the target.
+    Excludes writes (create/modify/open(...,'w')), deletes, and plain mentions.
     """
     t = glob_to_regex(target_glob)
     m = _map()
     acts = "|".join(re.escape(a) for a in m["read_actions"])
     verbs = "|".join(re.escape(v) for v in m["read_shell_verbs"])
     parts = [
-        rf"(?s:^(?:{acts})\b.*{t})",          # 1. read-tool actions (. crosses newlines to path)
-        rf"(?:\b(?:{verbs})\b[^\n]*{t})",      # 2. shell read-verb + target on same line
+        rf"(?s:^(?:{acts})\b.*{t})",          # (1) read tool action (`.` crosses lines into path)
+        rf"(?:\b(?:{verbs})\b[^\n]*{t})",      # (2) shell read verb + target on the same line
     ]
     idioms = m.get("read_idioms") or []
     if idioms:
-        idi = "|".join(idioms)                 # idioms are themselves regex, do not escape
-        # 3. within the same action, a read idiom and the target both appear
-        #    (use [\s\S] to cross newlines, allowing multi-line Python).
+        idi = "|".join(idioms)                 # idioms are already regexes, no escaping
+        # (3) same action has both the read idiom and the target (use
+        # [\s\S] to cross lines so multi-line python is allowed).
         parts.append(rf"(?=[\s\S]*(?:{idi}))(?=[\s\S]*{t})")
     return "|".join(parts)
 
 
 def run_program_regex(target_glob: str) -> str:
-    """Build the program regex for "executed target": after optionally
-    stripping prefixes (timeout/sudo/...), the subcommand starts with target.
-    Avoids "mentioned in command" or substring false matches."""
+    """Build the "executed target" program regex: after optionally stripping
+    prefixes (timeout/sudo/...), the subcommand must start with the target.
+    Avoids false matches like "command body mentioned it" or substring hits."""
     t = glob_to_regex(target_glob)
     prefixes = _map().get("run_prefixes") or []
     pref = rf"(?:{'|'.join(prefixes)})*" if prefixes else ""
@@ -121,13 +122,13 @@ def run_program_regex(target_glob: str) -> str:
 
 
 def writes_regex(target_glob: str) -> str:
-    """Build the regex for "wrote target" (Forbidden rules need full coverage,
-    so we cover many syntactic forms):
-       1. tool writes (create_file/modify_file/append_file) mention target; or
-       2. shell redirection writes: > / >> / tee / dd followed on same line by target; or
-       3. write idioms: open(...,'w') / .write() / json.dump( etc. together with target.
-    Residual blind spot: writes done inside a script (target does not appear
-    in the command) cannot be caught.
+    """Build the "wrote target" regex (forbid rules must be comprehensive, so
+    this covers several forms):
+       (1) a tool write (create_file/modify_file/append_file) mentions target; or
+       (2) shell redirect writes: > / >> / tee / dd followed by target on same line; or
+       (3) write idiom: open(...,'w')/.write()/json.dump( appears together with target.
+    Remaining blind spot: writes inside a script (target not present in the
+    command string) cannot be captured.
     """
     t = glob_to_regex(target_glob)
     m = _map()
@@ -135,13 +136,13 @@ def writes_regex(target_glob: str) -> str:
     ops = m.get("write_shell_ops") or [">>", ">", "tee", "dd"]
     op_alt = "|".join(re.escape(o) if o in (">", ">>") else rf"\b{re.escape(o)}\b" for o in ops)
     parts = [
-        rf"(?s:^(?:{wacts})\b.*{t})",          # 1. tool writes
-        rf"(?:{op_alt})[^\n]*{t}",              # 2. shell redirection write + target on same line
+        rf"(?s:^(?:{wacts})\b.*{t})",          # (1) tool write
+        rf"(?:{op_alt})[^\n]*{t}",              # (2) shell redirect write + target on same line
     ]
     idioms = m.get("write_idioms") or []
     if idioms:
         idi = "|".join(idioms)
-        parts.append(rf"(?=[\s\S]*(?:{idi}))(?=[\s\S]*{t})")   # 3. write idiom + target
+        parts.append(rf"(?=[\s\S]*(?:{idi}))(?=[\s\S]*{t})")   # (3) write idiom + target
     return "|".join(parts)
 
 
@@ -151,8 +152,7 @@ def _severity(cp: dict, default: str) -> str:
 
 
 def _phrase_to_matcher(phrase: str) -> dict:
-    """The embedded phrase `"<verb> <target>"` inside pipeline / before ->
-    one matcher dict.
+    """pipeline/before inline phrase `"<verb> <target>"` -> a matcher dict.
 
     landmark (reads/write/sees...) -> pure regex; runs -> run_command;
     dispatches -> spawn.
@@ -173,8 +173,8 @@ def _phrase_to_matcher(phrase: str) -> dict:
         return m
     if verb in ("reads", "read", "sees"):
         return {"regex": reads_regex(target if (target and target != "*") else "")}
-    # Anything else (write/...) is treated as a "landmark": some content just
-    # needs to appear, mechanism-agnostic.
+    # Everything else (write/...) is treated as a "landmark": appearance
+    # anywhere counts, mechanism-independent.
     return {"regex": rx} if rx else {"regex": glob_to_regex(verb)}
 
 
@@ -183,8 +183,8 @@ def _err(cid: str, msg: str) -> dict:
 
 
 def desugar_check(cp: dict) -> dict:
-    """Compile one intent rule into a low-level check dict. Rules that already
-    carry `type` are returned unchanged."""
+    """Compile one intent rule into a low-level check dict. Rules that
+    already carry `type` are returned verbatim."""
     if not isinstance(cp, dict):
         return _err("?", f"rule must be an object, got {type(cp).__name__}")
     if "type" in cp:                     # low-level checker, pass through
@@ -209,7 +209,8 @@ def desugar_check(cp: dict) -> dict:
         return build({"type": "Exists", "match": {"regex": reads_regex(g)}},
                      "recommended", "reads_" + _slug(g))
 
-    if "touches" in cp:                  # loose: file appears anywhere in the run (read/write/mention all count), used as a landmark
+    if "touches" in cp:                  # Loose: file appeared in the run
+                                          # (reads/writes/mentions all count); use as a landmark.
         g = cp["touches"]
         return build({"type": "Exists", "match": {"regex": glob_to_regex(g)}},
                      "recommended", "touches_" + _slug(g))
@@ -229,9 +230,9 @@ def desugar_check(cp: dict) -> dict:
         match = {"action": "spawn_subagent"}
         if x and x != "*":
             match["regex"] = glob_to_regex(x)
-        # If only at_most is given (no at_least), lower bound = 0 (i.e. "<= N",
-        # allowing 0 occurrences); if neither is given -> lower bound = 1
-        # (must dispatch).
+        # When only `at_most` is given (no `at_least`), the lower bound is 0
+        # (i.e. "<=N", allowing 0 occurrences). If neither is given, the
+        # lower bound is 1 (must dispatch).
         if "at_least" in cp:
             lo = cp["at_least"]
         elif "at_most" in cp:
@@ -253,12 +254,12 @@ def desugar_check(cp: dict) -> dict:
     if "before" in cp:
         pair = cp["before"]
         if not (isinstance(pair, list) and len(pair) == 2):
-            return _err(cid, "before must be a list of exactly two phrases [\"do first\", \"do after\"]")
+            return _err(cid, "before must be a list of exactly two phrases [\"first\", \"then\"]")
         return build({"type": "Before", "a": _phrase_to_matcher(pair[0]),
                       "b": _phrase_to_matcher(pair[1])},
                      "required", "before_" + _slug(pair[0]))
 
-    # -- never_* (forbidden, severity is always forbidden) --
+    # -- never_* (forbid; severity is always forbidden) --
     for key, mk in (("never_runs", lambda g: {"action": "run_command", "regex": glob_to_regex(g)}),
                     ("never_reads", lambda g: {"regex": glob_to_regex(g)}),
                     ("never_writes", lambda g: {"regex": writes_regex(g)}),
@@ -269,7 +270,7 @@ def desugar_check(cp: dict) -> dict:
                 extra["exclude"] = {"regex": glob_to_regex(cp["except"])}
             return build(extra, "forbidden", key + "_" + _slug(cp[key]), force_sev="forbidden")
 
-    # -- if_claims ... then_* (catch fabrication / conditional implication) --
+    # -- if_claims ... then_* (fakery detection / conditional implication) --
     if "if_claims" in cp:
         a = {"regex": glob_to_regex(cp["if_claims"])}
         if "then_runs" in cp:
@@ -281,7 +282,7 @@ def desugar_check(cp: dict) -> dict:
         elif "then_reads" in cp:
             b = {"regex": glob_to_regex(cp["then_reads"])}
         else:
-            return _err(cid, "if_claims must be paired with one of then_runs / then_dispatches / then_write / then_reads")
+            return _err(cid, "if_claims needs one of then_runs / then_dispatches / then_write / then_reads")
         return build({"type": "IfThen", "a": a, "b": b}, "recommended",
                      "ifclaims_" + _slug(cp["if_claims"]))
 
