@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-23
+
 ### Added
 
 - **`evalkit/graph/`** — trajectory provenance graph. Actions become activities, outputs become versioned entities, edges capture producer/consumer relations. Produces a self-contained interactive HTML viewer (one page per turn + overview). Not a verdict path; a reader-facing fact-layer derivative. See `evalkit/graph/DESIGN.md`.
@@ -80,5 +82,6 @@ Bugs found during adversarial testing of the trajectory engine, all fixed before
 
 Hardening: `run_check` is now the single validation gate (rule integrity / severity / regex / numeric sanity), plus per-check `try/except` — a single checker failure no longer aborts the run. These invariants are documented in `LLM_GUIDE.md §7`.
 
-[Unreleased]: https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Try-to-Climb/Kiro_Trajectory_Eval/releases/tag/v0.1.0
