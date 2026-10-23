@@ -5,6 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`evalkit/graph/`** — trajectory provenance graph. Actions become activities, outputs become versioned entities, edges capture producer/consumer relations. Produces a self-contained interactive HTML viewer (one page per turn + overview). Not a verdict path; a reader-facing fact-layer derivative. See `evalkit/graph/DESIGN.md`.
+- **`evalkit/evidence/canonicalize.py`** — shell command canonicalization (peel scaffold + Python AST walk) producing a `structure_hash` so that commands sharing a template but differing only in inline args no longer collide in efficiency's duplicate detection.
+- **`evalkit/rules/genrule/`** — stepwise rule generation: decompose the agent config into task types and ordered stages, extract policies stage by stage with explicit observability classification, compile the policy IR deterministically to `.checks.json`. Complements the one-shot `generate-rule.sh`. See `evalkit/rules/GENERATION.md`.
+- **`session-viz/`** — standalone single-file HTML viewer for a Kiro session, with two semantic zoom levels (session overview + per-turn event stream). No external dependencies, offline-usable.
+- **DSL tightening**: new `touches` (loose landmark) and `never_writes` (write ban covering tool / shell redirect / python idiom); `reads` now recognises python read idioms (`json.load`, `.read()`, `open()` single-arg); `runs` matches at subcommand head after stripping prefixes (`timeout`, `sudo`, `env`, `python -m`, ...). Intent→action/verb map is externalised to `rules/intent_map.json`.
+- **Normalization contract documented**: `evalkit/normalize/__init__.py` now carries a full field-by-field contract of the two input sources, the `TraceIR` / `Action` output shape, fan-out semantics, and the warn-vs-raise caveat.
+- `Action` dataclass gains `sid` / `ref` (`<sid8>#<idx>`, globally unique across sessions) and `cwd` (effective working directory). `TurnMeta` gains `cycles` (number of inner loops, drives efficiency's stuck-turn detection); `OfficialRecord` gains `parent_session_id`, `updated_at`, `compactions`, and `unknown_kinds`.
+- Rule evaluation now defaults to reading the Kiro official session record (`rule.runner --session <sid>` no longer requires `--official`); hook trace is a fallback via `--hook`. `--official-dir` can override the resolved directory on `rule.runner`, `normalize.cli`, and `pipeline.py`.
+- `normalize.cli` echoes loader warnings and a "0 actions" line to stderr so a mis-pointed `--official-dir` no longer looks like a clean run.
+- `goal` (ex `eval-agent/`) is now a sibling of `rule`, `efficiency`, and `graph` under `evalkit/`. The `--agent-dir` flag now falls back to `KIRO_EVAL_AGENT_DIR` env var.
+- Two upstream `tree-sitter-bash` defects discovered while building the graph's command extractor are filed under `reported/`.
+
+### Changed
+
+- `evalkit/trajectory/` renamed to `evalkit/rule/`. Entry point is now `python3 -m rule.runner`.
+- `eval-agent/` top-level directory merged into `evalkit/goal/`. `_bootstrap.py` is gone; `evidence/`, `llm.py`, and `kiro_acp.py` sit at the `evalkit/` root. Entry point is now `python3 -m goal.runner`.
+- One `unittest discover` from `evalkit/` runs the full suite (705 tests across normalize, rule, goal, efficiency, graph; 16 skipped — the graph page-harness tests that require `node` + `npm install`).
+- `efficiency.s1_map(sid, official_dir)` → `s1_map(tree)`; drops redundant raw-JSON reads now that `normalize/official.py` parses the same fields. The IR pickle cache now embeds a schema fingerprint and auto-expires when the pickled dataclasses change.
+- `dispatches` with only `at_most` given lowers the implicit lower bound to 0 (`<=N` allows 0 occurrences); both unspecified still requires at least one dispatch.
+
 ## [0.1.0] — 2026-08-18
 
 Initial public release.

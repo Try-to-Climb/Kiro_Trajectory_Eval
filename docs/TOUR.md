@@ -31,24 +31,27 @@
                     │  either source → same TraceIR│
                     └────────────────────────────┘
                              │
-                ┌────────────┼────────────┐
-                ▼                         ▼
-       ┌─────────────────┐       ┌─────────────────┐
-       │ evalkit/         │       │ evalkit/goal/     │
-       │ rule/      │       │ 9-step pipeline │
-       │ rule matching    │       │ user reqs → evidence │
-       └────────┬────────┘       └────────┬────────┘
-                │                         │
-                ▼                         ▼
-        PASS / WEAK / FAIL         PASS / WEAK / FAIL / INVALID
-        + health score             + per-req evidence + confidence
-        + OTLP/JSON export
+            ┌────────────────┼────────────────┬────────────────┐
+            ▼                ▼                ▼                ▼
+   ┌─────────────────┐ ┌─────────────────┐ ┌────────────┐ ┌───────────┐
+   │ evalkit/rule/   │ │ evalkit/goal/   │ │ efficiency │ │  graph/   │
+   │ 7 checkers +    │ │ 9-step pipeline │ │ cost /     │ │ provenance│
+   │ rule matching   │ │ reqs → evidence │ │ waste /    │ │ (reader   │
+   │ (verdict path)  │ │ (verdict path)  │ │ churn      │ │  only)    │
+   └────────┬────────┘ └────────┬────────┘ └─────┬──────┘ └─────┬─────┘
+            │                   │                 │              │
+            ▼                   ▼                 ▼              ▼
+    PASS / WEAK / FAIL  PASS / WEAK / FAIL /     metrics +     interactive
+    + health score      INVALID + evidence +     per-run        single-file
+    + OTLP/JSON export  confidence               waste report   HTML
 ```
 
 ## Which component do I want?
 
-- **Batch-check whether Kiro sessions followed the expected trajectory** (automated verdicts): `evalkit/`
+- **Batch-check whether Kiro sessions followed the expected trajectory** (automated verdicts): `evalkit/rule/`
 - **Deep-dive one run: did the agent actually accomplish what the user asked?** (need cited evidence): `evalkit/goal/`
+- **Measure how much of a run was wasted** (cost / churn / stuck turns): `evalkit/efficiency/`
+- **Read a long run as a graph instead of a flat log** (what produced what, who consumed it): `evalkit/graph/`
 - **Audit every tool call, block dangerous ones, get millisecond timing**: install `hooks/`
 - **View agent behavior as a timeline in Jaeger / Tempo**: `evalkit/normalize/ export-otel`
 
@@ -68,6 +71,11 @@
 1. `evalkit/goal/README.md` — table of the 9-step pipeline
 2. `evalkit/goal/docs/R10.1_walkthrough.md` — one real requirement traced through all 9 steps
 3. `evalkit/goal/DESIGN.md` — design rationale and rejected alternatives
+
+**Want to read a long run as a graph**:
+1. `evalkit/graph/DESIGN.md` — the model (bipartite activities / versioned entities / three edge classes) and the AgentTrails reference it borrows from
+2. `python3 -m graph.cli <session-id> --official-dir <dir> --format html > /tmp/out.html` — try it; open the HTML in a browser
+3. `evalkit/graph/tests/page-harness/README.md` — the DOM runtime harness and its limits
 
 **Want to add a new checker or a new direction**:
 1. `CONTRIBUTING.md`

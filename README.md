@@ -2,13 +2,14 @@
 
 **Kiro_Trajectory_Eval** turns a Kiro CLI agent run into a structured, auditable evaluation. It reads the session record that Kiro writes to `$KIRO_HOME/sessions/cli/`, normalizes it into a stable action sequence, and judges whether the agent **actually did what it said it did** — matching the run's real behavior against its stated intent, produced artifacts, and user requirements.
 
-Everything now lives under [`evalkit/`](evalkit/README.md), sharing one fact layer (`normalize/` + `evidence/`) and splitting into three verdict paths:
+Everything now lives under [`evalkit/`](evalkit/README.md), sharing one fact layer (`normalize/` + `evidence/`) and splitting into three verdict paths plus one reader-facing derivative:
 
 | Path | What it does | When to use |
 |---|---|---|
 | **[`evalkit/rule/`](evalkit/rule/README.md)** | Declarative rules over the normalized action sequence. Seven built-in checkers (`Exists` / `Count` / `Forbidden` / `Before` / `Milestone` / `IfThen` / `Produces`) plus optional `LLMJudge`. Outputs `PASS` / `WEAK_PASS` / `FAIL` and a health score. Can export **OpenTelemetry OTLP/JSON**. | "Did this run follow the expected trajectory? Does the agent's behavior match its self-reported actions?" |
 | **[`evalkit/goal/`](evalkit/goal/README.md)** | Forensic 9-step pipeline (rule-free). Extracts atomic requirements from user prompts and self-claims from agent responses, then searches the trajectory for evidence. Each conclusion cites the action IDs it depends on, with a confidence score. | "Did the agent actually accomplish what the user asked for?" |
 | **`evalkit/efficiency/`** | Cost / waste / churn / stuck: did this run spend its budget well, or re-read / re-write / loop? | "Was the run efficient?" |
+| **[`evalkit/graph/`](evalkit/graph/DESIGN.md)** *(reader-facing)* | Trajectory provenance graph: actions are activities, products are versioned entities, edges are "who produced / consumed what". Produces an interactive single-file HTML. Not a verdict path. | "I want to understand what one run actually did" — turns a flat 277-action log into a readable graph. |
 | **[`hooks/`](hooks/)** *(optional)* | Runtime Kiro CLI hook collector. Adds signals the built-in session records don't capture: `preToolUse` policy blocks, precise millisecond timing, live tracing. **Not required** — evaluation works out of the box using `--official`. | Only when you need signals beyond what Kiro's built-in records provide. |
 
 ## Why look at the trajectory instead of the final output?
@@ -49,8 +50,10 @@ Kiro_Trajectory_Eval/
 │   ├── rule/            declarative rules + 7 checkers + LLMJudge
 │   ├── goal/            forensic 9-step goal-completion pipeline
 │   ├── efficiency/      cost / waste / churn / stuck
+│   ├── graph/           provenance graph viewer (reader-facing, not a verdict)
 │   ├── llm.py, kiro_acp.py    shared LLM plumbing
 │   └── rules/           per-subject rule files (data)
+├── session-viz/      Standalone HTML viewer for a single Kiro session
 ├── hooks/            Optional Kiro CLI hook collector (bash + jq)
 ├── bin/kiro-trace    CLI to inspect collected traces
 ├── config/           Sample configs: policy.json, traced-agent.json, kiro-judge.json
@@ -73,10 +76,11 @@ If you don't use `kiro-cli`, the declarative-rule path (`evalkit/`) and the dete
 
 - **5-minute tour**: [`docs/TOUR.md`](docs/TOUR.md) — how the pieces fit together, which one to look at first
 - Sub-project docs: [`evalkit/README.md`](evalkit/README.md), [`evalkit/goal/README.md`](evalkit/goal/README.md)
-- Rule authoring: [`evalkit/rules/AUTHORING.md`](evalkit/rules/AUTHORING.md)
+- Rule authoring: [`evalkit/rules/AUTHORING.md`](evalkit/rules/AUTHORING.md) (hand-written) and [`evalkit/rules/GENERATION.md`](evalkit/rules/GENERATION.md) (one-shot vs. stepwise generation)
 - OpenTelemetry mapping: [`evalkit/OTEL_MAPPING.md`](evalkit/OTEL_MAPPING.md)
 - LLM reference: [`evalkit/LLM_GUIDE.md`](evalkit/LLM_GUIDE.md)
 - Forensic evaluator design: [`evalkit/goal/DESIGN.md`](evalkit/goal/DESIGN.md)
+- Provenance graph design: [`evalkit/graph/DESIGN.md`](evalkit/graph/DESIGN.md)
 
 ## Contributing
 
