@@ -23,23 +23,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: evalkit — normalize tests
+      # One `unittest discover` from evalkit/ runs the full suite (normalize +
+      # rule + goal + efficiency + graph). The page-harness tests under
+      # graph/tests/ are skipped automatically when `node` is not present.
+      - name: evalkit — full test suite
         working-directory: evalkit
-        run: python -m unittest discover -s normalize/tests -t . -v
-
-      - name: evalkit — trajectory tests
-        working-directory: evalkit
-        run: python -m unittest discover -s trajectory/tests -t . -v
+        run: python -m unittest discover -v
 
       - name: evalkit — sample rule smoke test
         working-directory: evalkit
-        run: python -m trajectory.runner rules/example-minimal.checks.json examples/sample.normalized.json
-
-      - name: eval-agent — unit tests
-        working-directory: eval-agent
-        env:
-          EVALKIT_DIR: ${{ github.workspace }}/evalkit
-        run: python -m unittest discover -s tests -t . -v
+        run: python -m rule.runner rules/example-minimal.checks.json examples/sample.normalized.json
 
   shellcheck:
     name: shellcheck
