@@ -20,7 +20,8 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Optional
 
-from .schema import (CERTAIN, GENERATED_BY, INFORMED_BY, USED_BY, WEAK,
+from .schema import (CERTAIN, CONNECTED_BY, GENERATED_BY, INFORMED_BY, USED_BY,
+                     WEAK,
                      Activity, Edge, Entity, ProvGraph)
 
 __all__ = ["View", "select", "to_mermaid", "to_dot", "to_text",
@@ -177,6 +178,7 @@ def to_mermaid(g: ProvGraph, turns: Optional[Iterable[int]] = None,
 EDGE_COLOURS = {
     GENERATED_BY: "#c2410c",          # activity produced this -- outward
     USED_BY: "#2563eb",               # activity consumed this -- inward
+    CONNECTED_BY: "#0e7490",          # activity touched a host -- lateral
     INFORMED_BY: "#8250df",           # weak association between activities
 }
 

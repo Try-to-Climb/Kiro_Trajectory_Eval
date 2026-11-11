@@ -221,10 +221,12 @@ def record(action, env: Optional[dict] = None) -> dict:
     # wrong -- `args.working_dir` where the graph uses `cwd`, which put a[109]'s
     # relative paths under a tree that does not exist.
     from graph.build import _command_paths
-    claims, skipped = _command_paths(d, env or {})
+    claims, skipped, weak = _command_paths(d, env or {})
     out["edges"] = sorted((p, d, why) for p, d, why in claims)
     out["skipped"] = [list(x) if isinstance(x, tuple) else [str(x), ""]
                       for x in (skipped or ())]
+    if weak:
+        out["weak"] = sorted((p, d, why) for p, d, why in weak)
     out["via"] = "syntax tree" if st.get("ok") else "regex fallback"
     out["parsed"] = bool(st.get("ok"))
     if not st.get("ok"):

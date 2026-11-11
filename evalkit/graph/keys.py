@@ -332,6 +332,16 @@ def normalize_path(literal: str, working_dir: Optional[str]) -> Optional[str]:
     t = literal.strip("\"'`,()")
     if not t:
         return None
+    # Reject anything a path cannot plausibly be: newlines or control chars
+    # mean we grabbed the body of a heredoc / multi-line quoted argument
+    # (seen in `source ... ; echo "GITENV DONE"` style blocks), and letting
+    # those through produces entity keys that break DOT's quoted-string
+    # parser downstream (`syntax error near '@'`). Length cap guards against
+    # multi-KB python heredocs the AST walker occasionally mis-attributes.
+    if any(ch == "\n" or ch == "\r" or (ch < " " and ch != "\t") for ch in t):
+        return None
+    if len(t) > 1024:
+        return None
     if _UNRESOLVED_RE.search(t):        # $VAR, $(...), globs -> Task 5
         return None
     if t.startswith(_SKIP_PREFIXES):
@@ -554,6 +564,17 @@ def expand_vars(token: str, env: Mapping[str, str]) -> Optional[str]:
 
     out = _VAR_USE_RE.sub(sub, token)
     return None if missing or "$" in out else out
+
+
+def referenced_names(token: str) -> set[str]:
+    """Every `$VAR` name referenced in `token`.
+
+    Used by `shell_ast` (DESIGN §7.13) to decide if an unresolved variable
+    path is backed only by names that are never locally reassigned, i.e. a
+    stable process-env global like `$KIRO_HOME`. Does not match special
+    variables (`$$`, `$1`, `$?`) -- the regex only accepts `[A-Za-z_]\\w*`.
+    """
+    return {m.group(1) for m in _VAR_USE_RE.finditer(token)}
 
 
 def _scan(command: str, working_dir: Optional[str],

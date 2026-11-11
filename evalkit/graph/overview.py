@@ -14,7 +14,8 @@ from __future__ import annotations
 import collections
 from typing import Any, Optional, Sequence
 
-from .schema import (CERTAIN, GENERATED_BY, LIKELY, USED_BY, Activity, Entity,
+from .schema import (CERTAIN, CONNECTED_BY, GENERATED_BY, LIKELY, USED_BY,
+                     Activity, Entity,
                      ProvGraph)
 
 __all__ = ["build_overview", "turn_summary"]
@@ -69,6 +70,14 @@ def build_overview(g: ProvGraph, prompts: Sequence[str] = ()
             producer_turn.setdefault(e.dst, turn_of[e.src])
         elif e.kind == USED_BY:
             consumer_turns[e.src].add(turn_of[e.dst])
+        elif e.kind == CONNECTED_BY:
+            # A host counts for "which turns touched this entity" the same way
+            # a read does: it is a dependency, with the same direction (entity
+            # → activity). Without this the overview sees a host as touched by
+            # zero turns and drops it, so a session whose only cross-turn
+            # artifact is a host (`example-session-x`) ends up with no overview at all
+            # and lands the reader straight into a turn.
+            consumer_turns[e.src].add(turn_of[e.dst])
 
     ov = ProvGraph(session_id=g.session_id)
 
@@ -81,8 +90,18 @@ def build_overview(g: ProvGraph, prompts: Sequence[str] = ()
             continue
         shared[node_id] = (produced_in, read_in)
 
-    used_turns = sorted({t for p, r in shared.values()
-                         for t in ([p] if p is not None else []) + r})
+    # Every turn that has any activity gets a card. The "entities shared by
+    # ≥2 turns" rule still shapes *which entity nodes* are drawn, but it no
+    # longer decides whether a turn exists on the overview. A session like
+    # `example-session-x` has early turns of pure probes (grep / knowledge_search) and
+    # later turns that reach a host; the earlier ones should not vanish from
+    # the overview just because they produced no cross-turn hand-off.
+    used_turns = sorted({a.turn for a in g.activities.values()})
+    # A one-turn session has nothing cross-turn to summarise -- `to_html`
+    # treats an empty overview as "skip the overview view", so the single
+    # turn is the whole page and no stray "overview with one card" shows up.
+    if len(used_turns) < 2:
+        return ov, {}
     for t in used_turns:
         s = summary.get(t, {"actions": 0, "kinds": collections.Counter()})
         kinds = ", ".join(f"{n}×{k.replace('_', ' ')}"
@@ -107,12 +126,17 @@ def build_overview(g: ProvGraph, prompts: Sequence[str] = ()
         if produced_in is not None:
             ov.add_edge(f"a:turn{produced_in}", e_id, GENERATED_BY, CERTAIN,
                         f"written during turn {produced_in}")
+        # For a host, the overview edge is `connectedBy` -- same direction as
+        # `usedBy` but the label on the picture should say "contacted", not
+        # "read", because the far-side file wasn't the point.
+        edge_kind = CONNECTED_BY if ent.kind == "host" else USED_BY
+        verb = "contacted" if ent.kind == "host" else "read"
         for t in read_in:
             if t == produced_in:
                 continue          # within one turn: not what this view is about
             try:
-                ov.add_edge(e_id, f"a:turn{t}", USED_BY, CERTAIN,
-                            f"read during turn {t}")
+                ov.add_edge(e_id, f"a:turn{t}", edge_kind, CERTAIN,
+                            f"{verb} during turn {t}")
             except Exception:
                 # A read in the same turn as the write, or before it, is not a
                 # hand-off between turns; the invariants reject it and that is

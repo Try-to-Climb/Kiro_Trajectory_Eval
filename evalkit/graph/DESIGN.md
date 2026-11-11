@@ -379,6 +379,113 @@ rewrites, whether read after last write, whether orphaned). Isolation
 reasons are propagated into the interactive view so a reader can see why a
 node is unconnected rather than just that it is.
 
+### Task 7 step 4: Four refinements after Task 6b (done)
+
+Four things real reading surfaced that the Task 6b page could not answer.
+All four changes are display-only; none of them change the graph's
+semantics (no new edges, no new extraction).
+
+**(a) Hosts as entities.** When a command runs `ssh` / `sshpass ssh` /
+`scp` / `rsync` / `docker exec` / `docker cp` / `kubectl exec` / `kubectl
+cp`, add a host node (`kind="host"`) with a scheme-prefixed key
+(`ssh://user@h`, `docker://<cid>`, `k8s://<pod>`) and a new
+`connectedBy` edge from host to activity. Remote commands are **not**
+drilled into (the remote side may not be bash; the remote filesystem is
+different and same-named local files would get falsely merged), but the
+node lets a reader see "this turn reached out to that machine". Hosts
+are "born before the run" (`born_idx=-1`, `version=0`,
+`producer_ref=None`), so the time-ordering check accepts any activity
+connecting to them, and they are **excluded** from artefact-fate
+analysis (they are not produced). The new edge kind exists separately
+from `usedBy` so downstream analysis can ask "did this run reach an
+external system" without scanning keys for scheme prefixes. Measured on
+one 27-ssh session: edges 0 -> 21, isolation 100% -> 27.6% (the
+remainder are `knowledge_search` / `search_content` which do not touch
+files or hosts).
+
+**(b) Probe field on activities.** `search_content` / `search_files` /
+`list_dir` / `code_search_symbols` are deliberately isolated -- we do
+not know what they hit without reading the response, and a wrong edge
+is worse than none. But readers still want to see "what was this action
+looking for". `Activity.probe: Optional[dict]` captures pattern / path
+/ root from `action.args` for the card hint line and the right-hand
+panel, with the target (if the graph already has a file node with the
+same name) linkable but labelled `(not linked -- probe only)` to make
+the deliberate missing edge visible. A subtle bug surfaced here:
+selecting the target by "highest version" alone (without filtering
+`born_idx < this.idx`) made an early grep "look at" a file produced
+much later -- reverse causality. Version filtering fixed.
+
+**(c) Per-turn final reply.** The flat `ir.responses` has one entry per
+`AssistantMessage`, not one per turn; the official record lets a turn
+produce several assistant texts ("write -> call tool -> write -> call
+tool -> write"). A new `TraceIR.responses_by_turn: dict[int, list[str]]`
+mirrors the appends without touching the flat list (downstream
+efficiency / goal keep their existing positional indexing). The HTML
+renders the last segment (closest to what the user sees as the turn's
+answer) as a green "FINAL REPLY" chip at the bottom of the graph area,
+clickable to expand into the right panel.
+
+**(d) Duration stat replaces edge count.** The top-right stats bar for
+each view now shows duration instead of link count ("how long" is
+derivable only from data; "how many edges" is countable from the
+picture). Per-action timestamps are not available in the official record
+(only `Prompt` carries one), so the source is the official turn-level
+`turn_duration` -- wall clock from Kiro itself. Per-turn views show that
+value; the overview shows the sum. Formatting: `<1s / 12s / 3m 4s /
+1h 23m`.
+
+### Task 7 step 5: Variable-path placeholder entities (done)
+
+Shell-bridge agents (one typical example: a parent orchestrator whose
+commands call `nohup bash $KIRO_HOME/scripts/orchestrator.sh`) write
+paths carrying shell variables the run never `echo`s. The old rule was
+"no value, no claim", and such a run collapsed to a few isolated
+activities with many warnings.
+
+The constraint behind the rule is real: minting a value we never saw
+would merge two different runs' `$LOGFILE`s (pointing at different
+files) into one entity. The fix splits variable references by **run-
+local behaviour**:
+
+- **Local** -- a name ever assigned somewhere in this run
+  (`LOGFILE=$(date ...)`). Values can change between references, so the
+  path is still refused to avoid cross-call collisions.
+- **Global** -- a name never locally reassigned. Treat as a stable
+  process-env handle; keep the literal token as an entity key at
+  `WEAK` confidence so the picture shows the dependency.
+
+Classification happens once per run (`_connect_commands` pre-scans every
+`run_command` to collect all locally-assigned names) and is passed into
+`shell_ast.extract` as a set, so every claim in the same pass uses the
+same decision. `$$`, `$RANDOM`, `$(cmd)`, and positional parameters stay
+skipped -- they are runtime values that cannot be stable entity keys.
+
+Known caveats (documented rather than hidden):
+1. Within one run, a mid-run `echo $KIRO_HOME` makes later commands
+   resolve to an absolute path while earlier ones remain variable-form
+   -> the same file becomes two entities. In practice runs either never
+   echo (all variable, consistent) or echo early (most expanded, few
+   variable, still readable).
+2. Across sessions, `$KIRO_HOME/x` on machine A and B points to
+   different files -- same string, different semantics. Downstream
+   cross-run comparisons should filter `confidence=WEAK` variable-path
+   entities or bucket by variable name.
+3. Efficiency's multi-write detection (s6): same variable-form entity
+   may map to different real files (false positive), same file in two
+   forms may miss (false negative). Impact is confined to
+   `confidence=WEAK` entities and should be read with that in mind.
+
+### Task 7 step 6: Annotations on the page (done)
+
+The overview was read-only. The `--annotate` flag turns the same page
+into a workbench: click an activity node, four chips open on the left
+(`Standout` / `Violation` / `Duplication` / `Mistake`), with an optional
+comment. State persists in `localStorage` keyed by session id; a
+top-right bar shows the running count and offers export / import. The
+JSON schema (`annotate_schema.py`) is what the follow-up `tune/` module
+reads to turn annotations into prompt-tuning suggestions.
+
 ---
 
 ## 6. Reference graph: turn 6 retry loop

@@ -576,7 +576,7 @@ class TestAScriptFedToStdin(unittest.TestCase):
     def test_prose_is_not_a_path(self):
         """A sentence describing the script, with a filename inside it."""
         self.assertEqual(
-            self.ops("print('write the result to /tmp/probe_listagents.txt and compare')"), set())
+            self.ops("print('write result to /tmp/probe_listagents.txt and compare')"), set())
 
     def test_a_path_built_at_run_time_is_refused(self):
         """`open(p + '/s9_final_report.json')` with `p` a parameter used to yield
@@ -792,15 +792,15 @@ class TestTheDirectoryMovesWithCd(unittest.TestCase):
     """A `cd` part-way through a command moves what later paths resolve against.
 
     One command can run in several directories -- `cd /app; mkdir sub; cd sub;
-    > index.html` -- and `Action.cwd` is a single field, so it cannot say
-    which. Resolving everything against one value put files where they are
-    not: a reviewer reading 1524 external scripts called the results
-    `fabricated path` twice by name. Fabricating a node is worse than missing
-    an edge, because a reader cannot tell.
+    > index.html` -- and `Action.cwd` is a single field, so it cannot say which.
+    Resolving everything against one value put files where they are not: a
+    reviewer reading 1524 external scripts called the results `fabricated path`
+    twice by name. Fabricating a node is worse than missing an edge, because a
+    reader cannot tell.
 
-    The rule for what `cd X` does lives in `normalize.apply_cd`; what is here
-    is when to apply it, which needs the tree -- a `cd` inside `( … )` or a
-    pipeline is gone when the subshell ends.
+    The rule for what `cd X` does lives in `normalize.apply_cd`; what is here is
+    when to apply it, which needs the tree -- a `cd` inside `( … )` or a pipeline
+    is gone when the subshell ends.
     """
 
     def _pairs(self, cmd, wd="/app"):
@@ -830,8 +830,8 @@ class TestTheDirectoryMovesWithCd(unittest.TestCase):
             {("/app/before.txt", "read"), ("/app/sub/after.txt", "read")})
 
     def test_the_and_and_form(self):
-        self.assertEqual(self._pairs("cd /app && cd sublib && echo x > i.html"),
-                         {("/app/sublib/i.html", "write")})
+        self.assertEqual(self._pairs("cd /app && cd halaman && echo x > i.html"),
+                         {("/app/halaman/i.html", "write")})
 
     # ---- it does not move ------------------------------------------------
     def test_a_cd_in_a_subshell_does_not_escape(self):
@@ -843,8 +843,8 @@ class TestTheDirectoryMovesWithCd(unittest.TestCase):
                          {("/app/log.txt", "write"), ("/app/f.txt", "read")})
 
     def test_a_cd_in_a_loop_body_does_not_escape(self):
-        """The body is walked once per value, so a `cd` inside it would be
-        applied as many times as the list is long."""
+        """The body is walked once per value, so a `cd` inside it would be applied
+        as many times as the list is long."""
         self.assertEqual(self._pairs("for d in a b; do cd $d; done\ncat f.txt"),
                          {("/app/f.txt", "read")})
 
@@ -854,11 +854,15 @@ class TestTheDirectoryMovesWithCd(unittest.TestCase):
             self._pairs("if true; then cd a; else cd b; fi\ncat f.txt"),
             {("/app/f.txt", "read")})
 
+    def test_a_cd_in_a_function_body_does_not_escape(self):
+        self.assertEqual(self._pairs("f() { cd /tmp; }\ncat g.txt"),
+                         {("/app/g.txt", "read")})
+
     # ---- when it cannot be known ----------------------------------------
     def test_an_unreadable_cd_clears_the_base(self):
         """`cd $D` leaves the directory unknown. Keeping the old one resolves
-        `out.txt` to a file that does not exist, and a wrong edge to a real
-        file is worse than no edge (7.1)."""
+        `out.txt` to a file that does not exist, and a wrong edge to a real file
+        is worse than no edge (7.1)."""
         for target in ("$D", "~/x", "-"):
             self.assertEqual(self._pairs(f"cd {target}\ncat f.txt"), set(), target)
 
@@ -878,8 +882,117 @@ class TestTheDirectoryMovesWithCd(unittest.TestCase):
         ancestry check refused the `cd` because it crossed a `pipeline` node
         above, so `cmd file` resolved against the outer base instead of `/x`.
         28 real reads vanished from one session that way, all of them the
-        `cd /project && git show -- path` shape.
+        `cd /repo && git show -- path` shape.
         """
         self.assertEqual(
             self._pairs("cd /x && cat f.txt | head", wd=None),
             {("/x/f.txt", "read")})
+
+
+class TestARemoteEndpointIsAHost(unittest.TestCase):
+    """ssh / scp / rsync / docker exec / kubectl exec reach a far side.
+
+    The payload on the other side is not parsed: the remote shell may not be
+    bash (one real session used Windows CMD inside the quotes), and the paths
+    it names belong to a filesystem the local graph does not know. The
+    endpoint itself is a node, so a reader can tell which turn touched which
+    host without the far-side detail.
+    """
+
+    def _hosts(self, cmd, wd="/app"):
+        shell_ast.extract(cmd, wd)
+        return [k for k, _ in shell_ast.hosts_touched()]
+
+    # ---- ssh ----
+    def test_ssh_user_at_host_with_command(self):
+        self.assertEqual(
+            self._hosts('ssh user@h.example.com "ls /tmp"'),
+            ["ssh://user@h.example.com"])
+
+    def test_ssh_bare_host(self):
+        self.assertEqual(self._hosts("ssh h.example.com uptime"),
+                         ["ssh://h.example.com"])
+
+    def test_ssh_options_are_not_the_host(self):
+        """`-o KEY=VAL` is still a positional on the tree -- a `=` in the
+        token is the signal it is an option value and not an endpoint."""
+        self.assertEqual(
+            self._hosts('ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 '
+                        'user@10.0.0.1 "find /TMA"'),
+            ["ssh://user@10.0.0.1"])
+
+    def test_ssh_port_is_recorded(self):
+        self.assertEqual(self._hosts("ssh -p 29418 example.host "),
+                         ["ssh://example.host:29418"])
+
+    def test_ssh_g_is_a_config_query_not_a_connection(self):
+        self.assertEqual(self._hosts("ssh -G example.host"), [])
+
+    def test_sshpass_forwards_to_the_wrapped_verb(self):
+        self.assertEqual(
+            self._hosts("sshpass -p 'secret' ssh user@h 'uptime'"),
+            ["ssh://user@h"])
+
+    def test_an_unknown_host_variable_is_skipped(self):
+        """`$DST` leaves the endpoint unknown. Emitting an edge keyed on the
+        literal variable name would conflate every ssh under that variable."""
+        shell_ast.extract("ssh $DST 'uptime'", "/app")
+        self.assertEqual(shell_ast.hosts_touched(), [])
+        self.assertIn("ssh://$DST", [t for t, _ in shell_ast.skipped_paths()])
+
+    # ---- scp / rsync ----
+    def test_scp_upload(self):
+        self.assertEqual(
+            self._hosts("scp /tmp/a.txt user@h:/remote/a.txt"),
+            ["ssh://user@h"])
+
+    def test_scp_download(self):
+        self.assertEqual(
+            self._hosts("scp user@h:/remote/b.txt /tmp/b.txt"),
+            ["ssh://user@h"])
+
+    def test_scp_local_only_has_no_host(self):
+        """Two local paths. No `:` before the first slash means no endpoint."""
+        self.assertEqual(self._hosts("scp /tmp/a.txt /tmp/b.txt"), [])
+
+    def test_rsync_remote(self):
+        self.assertEqual(
+            self._hosts("rsync -av /src user@h.ex.se:/dst/"),
+            ["ssh://user@h.ex.se"])
+
+    def test_rsync_local_only_has_no_host(self):
+        self.assertEqual(self._hosts("rsync -av /src/ /dst/"), [])
+
+    # ---- docker / kubectl ----
+    def test_docker_exec(self):
+        self.assertEqual(
+            self._hosts("docker exec my_container cat /etc/hosts"),
+            ["docker://my_container"])
+
+    def test_docker_cp_to_container(self):
+        self.assertEqual(
+            self._hosts("docker cp /tmp/x.txt my_container:/root/x.txt"),
+            ["docker://my_container"])
+
+    def test_docker_run_is_not_counted(self):
+        """`run` boots a fresh image rather than attaching to a named
+        endpoint. Emitting an edge for the image name would be a different
+        node every pull."""
+        self.assertEqual(self._hosts("docker run --rm busybox echo hi"), [])
+
+    def test_kubectl_exec(self):
+        self.assertEqual(
+            self._hosts("kubectl exec my-pod -- ls /tmp"),
+            ["k8s://my-pod"])
+
+    def test_kubectl_cp(self):
+        self.assertEqual(
+            self._hosts("kubectl cp my-pod:/root/x.txt /tmp/x.txt"),
+            ["k8s://my-pod"])
+
+    def test_a_duplicate_endpoint_is_recorded_once(self):
+        """`scp a user@h:b user@h:c` names the same host twice, but one
+        contact is still one contact; the walker's host map dedups."""
+        self.assertEqual(
+            self._hosts("scp /tmp/a user@h:/b user@h:/c"),
+            ["ssh://user@h"])

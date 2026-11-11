@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>evalkit — Features</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --ink:#e6e8ee;
+    --mute:#9aa3b2; --line:#2a303c;
+    --rule:#f3b454;
+    --goal:#7bd389;
+    --eff:#c38cff;
+    --graph:#5aa9ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px;background:var(--bg);color:var(--ink);
+       font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",
+            Roboto,"Helvetica Neue",Arial,sans-serif}
+  h1{margin:0 0 4px;font-size:22px}
+  .sub{color:var(--mute);margin-bottom:22px;max-width:900px;font-size:13.5px}
+  .sub code{background:#000a;border:1px solid var(--line);padding:1px 5px;border-radius:4px;font-size:12px}
+  .sub b{color:var(--ink)}
+
+  .grid{display:grid;gap:16px;grid-template-columns:1fr 1fr}
+  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+
+  details{background:var(--panel);border:1px solid var(--line);
+          border-left:5px solid var(--c);border-radius:10px;overflow:hidden}
+  details[open]{background:var(--panel2)}
+  summary{list-style:none;cursor:pointer;padding:16px 18px;position:relative;
+          display:block}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"▸ Expand";position:absolute;right:16px;bottom:14px;
+                 color:var(--mute);font-size:11.5px}
+  details[open] summary::after{content:"▾ Collapse"}
+  summary:hover{background:rgba(255,255,255,.02)}
+
+  .tag{font-size:11.5px;letter-spacing:1px;color:var(--c);
+       text-transform:uppercase;font-weight:700}
+  .title{font-size:17px;font-weight:600;margin:2px 0 4px;display:block}
+  .q{color:var(--mute);font-size:13px;font-style:italic;display:block;
+     margin-bottom:10px}
+  .q::before{content:"Q: "}
+
+  .preview{display:grid;grid-template-columns:1fr;gap:4px;margin-bottom:14px}
+  .pline{display:flex;gap:8px;font-size:12.5px;color:var(--ink);align-items:baseline}
+  .pline b.key{color:var(--c);min-width:72px;font-size:11px;font-weight:700;
+               text-transform:uppercase;letter-spacing:.5px}
+  .pline span{color:var(--mute)}
+  .pline span b{color:var(--ink);font-weight:600}
+
+  .foot{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-right:80px}
+  .chip{display:inline-block;background:#0b0d12;border:1px solid var(--line);
+        padding:2px 8px;border-radius:6px;font-size:11px;color:var(--mute)}
+  .mod{font-size:11px;color:var(--mute);margin-left:auto}
+  .mod code{background:#000a;border:1px solid var(--line);padding:1px 5px;border-radius:4px;font-size:11px}
+
+  .body{padding:4px 18px 18px;border-top:1px dashed var(--line)}
+  .lab{font-size:11px;color:var(--mute);margin:14px 0 4px;letter-spacing:.5px;
+       text-transform:uppercase}
+  ul{margin:2px 0 0;padding-left:18px}
+  li{margin:4px 0;font-size:13px}
+  li b{color:var(--ink);font-weight:600}
+
+  .cmd{background:#000a;border:1px solid var(--line);border-radius:6px;
+       padding:8px 10px;font:12px ui-monospace,Menlo,Consolas,monospace;
+       color:#cfd4df;overflow-x:auto;margin-top:4px;white-space:pre}
+
+  .verdict{display:inline-block;background:#0b0d12;border:1px solid var(--line);
+           padding:3px 9px;border-radius:6px;font-size:11.5px;color:var(--mute);
+           margin-right:6px;margin-top:4px}
+</style>
+</head>
+<body>
+
+<h1>evalkit — Supported Features</h1>
+<div class="sub">
+  Same starting point: an agent run's trace (hook / official Kiro session) →
+  normalized into a unified action sequence → four complementary paths.
+  The first three deliver verdicts; the last one delivers comprehension.
+  <b>Click a card for more detail.</b>
+</div>
+
+<div class="grid">
+
+  <!-- 1. Trajectory Eval -->
+  <details style="--c:var(--rule)">
+    <summary>
+      <span class="tag">Trajectory Eval</span>
+      <span class="title">Did the agent follow the expected behavior/pipeline?</span>
+      <span class="q">Were required steps taken, in the right order, with no forbidden actions, and did claims match reality?</span>
+      <div class="preview">
+        <div class="pline"><b class="key">Core</b><span>8 checkers: <b>Milestone · Forbidden · Exists · Count · Before · IfThen · Produces · LLMJudge</b></span></div>
+        <div class="pline"><b class="key">Authoring</b><span>One <b>.checks.json</b> per agent, written in a structured intent DSL (reads/runs/dispatches/pipeline/never_*/if_claims…)</span></div>
+        <div class="pline"><b class="key">Extras</b><span><b>LLM-based rule generation</b> (genrule) + pre-compile self-check + configurable scoring (scoring.json)</span></div>
+        <div class="pline"><b class="key">Catches</b><span>Required steps / ordering / counts / forbidden zones / <b>claim-vs-action consistency</b> / artifact verification</span></div>
+      </div>
+      <div class="foot">
+        <span class="chip">PASS / WEAK / FAIL</span>
+        <span class="chip">Health score 0–1</span>
+        <span class="chip">Per-check ✓/✗ + reason</span>
+        <span class="mod"><code>rule/</code> + <code>rules/</code></span>
+      </div>
+    </summary>
+    <div class="body">
+      <div class="lab">Questions it answers</div>
+      <ul>
+        <li><b>Required steps</b>: key steps must appear (collect → probe → dispatch)</li>
+        <li><b>Ordering</b>: a must precede b; the full skeleton must run in order</li>
+        <li><b>Counts</b>: action occurrences must fall within a sane range (≥N / ≤N)</li>
+        <li><b>Forbidden zones</b>: privilege escalation / dangerous commands / scope overflow → immediate FAIL</li>
+        <li><b>Claim consistency</b>: if the agent claims it did X, there must be action evidence of X</li>
+        <li><b>Artifact verification</b>: key outputs must be written to disk (auto-matched to write actions)</li>
+        <li><b>Reasoning quality</b> (optional): LLMJudge scores selected dimensions</li>
+      </ul>
+      <div class="lab">Supporting tools</div>
+      <ul>
+        <li><b>genrule/</b>: LLM reads <code>AUTHORING.md</code> + agent config and auto-generates rules</li>
+        <li><b>pipeline.py</b>: auto-picks the rule file by agent name and runs eval end-to-end</li>
+        <li><b>--compile</b>: pre-compiles rules; invalid rules are rejected before eval</li>
+        <li><b>scoring.json</b>: weights / FAIL conditions / all-or-nothing scoring</li>
+      </ul>
+      <div class="lab">Example</div>
+      <div class="cmd">python3 -m rule.runner rules/&lt;agent&gt;.checks.json --session &lt;id&gt;
+python3 pipeline.py &lt;session-id&gt;              # one-liner</div>
+      <div class="lab">Sample output</div>
+      <div class="cmd">⚠️ WEAK_PASS   health=0.833
+checkpoint              checker    sev            reason
+---------------------------------------------------------------------
+collect_graph           Exists     required    ✓  read target agent graph
+collect_prompt          Exists     recommended ✗  read target prompt
+produce_cases           Produces   recommended ✗  produced case summary
+reachability_probe      Exists     required    ✓  reachability probe before dispatch
+dispatch                Count      required    ✓  dispatch sub-agent (≥1)
+MS_pipeline             Milestone  required    ✓  collect→gen→probe→dispatch in order (4/4)
+CPN1_no_eval_script     Forbidden  forbidden   ✓  orchestrator must not self-run eval script
+CPN2_no_direct_invoke   Forbidden  forbidden   ✓  must not bypass sub-agent
+authenticity_judge      LLMJudge   recommended ✓  (not run, LLM disabled)</div>
+      <div class="lab">Output</div>
+      <div>
+        <span class="verdict">PASS</span>
+        <span class="verdict">WEAK_PASS</span>
+        <span class="verdict">FAIL</span>
+        <span class="verdict">Health score 0–1</span>
+      </div>
+    </div>
+  </details>
+
+  <!-- 2. Completion Eval -->
+  <details style="--c:var(--goal)">
+    <summary>
+      <span class="tag">Completion Eval</span>
+      <span class="title">Did the agent actually do what the user asked?</span>
+      <span class="q">Break the user's ask into atomic requirements, hunt for evidence per requirement, draw conclusions with citations</span>
+      <div class="preview">
+        <div class="pline"><b class="key">Flow</b><span>Nine-step forensic pipeline: <b>requirements → claims → criteria → search → re-probe → filesystem crosscheck → judge</b></span></div>
+        <div class="pline"><b class="key">LLM use</b><span>LLM is called at <b>only 4 points</b>; everything else is deterministic. Every LLM output passes a validation gateway; invalid action IDs are rejected as hallucinations.</span></div>
+        <div class="pline"><b class="key">Safeguard</b><span><b>Built-in control group</b>: a fabricated requirement is injected; if the system judges it satisfied, the whole run is tagged INVALID</span></div>
+        <div class="pline"><b class="key">Evidence levels</b><span>direct · artifact · cross_session · derived · retrieved · none</span></div>
+      </div>
+      <div class="foot">
+        <span class="chip">PASS / WEAK / FAIL / INVALID</span>
+        <span class="chip">Completion %</span>
+        <span class="chip">Overclaim list</span>
+        <span class="mod"><code>goal/</code></span>
+      </div>
+    </summary>
+    <div class="body">
+      <div class="lab">Questions it answers</div>
+      <ul>
+        <li>Does requirement R1.x have <b>direct evidence</b>?</li>
+        <li>Did an <b>artifact land on disk</b> within the time window?</li>
+        <li>Is this only inferable indirectly, or do we have hard evidence?</li>
+        <li>Did the agent <b>claim</b> something it never actually did → <b>overclaim</b></li>
+        <li>Can the final answer be verified? If not → unverifiable rather than false</li>
+      </ul>
+      <div class="lab">Nine-step workflow</div>
+      <ul>
+        <li>s1 map / s2 extract requirements / s2b inject control group / s3 extract claims</li>
+        <li>s4 compile criteria / s5 search / s6 re-probe / s7 filesystem crosscheck / s8 judge / s9 aggregate</li>
+        <li>Verdict power lives <b>only in s8</b>; earlier steps emit candidates only. LLM failures degrade to "recall gaps" rather than wrong verdicts.</li>
+        <li>Human-confirmed requirements can be injected via <code>--requirements</code></li>
+      </ul>
+      <div class="lab">Known limits</div>
+      <ul>
+        <li>s2 extraction varies across runs → use <code>--requirements</code> for important evals</li>
+        <li>Responses not collected by default → outcome-type requirements go unverifiable (fix via <code>--with-responses</code>)</li>
+        <li>Official source timestamps are second-precision</li>
+      </ul>
+      <div class="lab">Example</div>
+      <div class="cmd">python3 -m goal.runner &lt;session-id&gt;
+python3 -m goal.runner &lt;id&gt; --requirements my.json --json out.json</div>
+      <div class="lab">Sample output (actual run on session 39dd8774)</div>
+      <div class="cmd">PASS   completion=1.0   (strong/active 3/3 met, 0 unverifiable, 0 unmet, overclaim 0)
+built-in control: 1 injected, passed (judged false)
+
+req     verdict  evidence_lvl    conf   reason
+R1.1    ✓        direct          0.9    trace shows agent_graph.json collection (#22), multi-dim test_cases
+                                        generation (#23/#26/#27), live skill routing (#31/#37/#39/#41) and
+                                        spawn_subagent dispatch (#54-56) — full collect→gen→probe→dispatch chain.
+        cites: 39dd8774#22, 39dd8774#23, 39dd8774#26, 39dd8774#31, 39dd8774#54, 39dd8774#55
+R1.2    ✓        derived         0.765  skill routing stage actually invoked the target via CLI and produced
+                                        service-alpha_live.log / service-beta_live.log (visible via grep) — real
+                                        LIVE call, not fabricated from reading the prompt.
+        cites: 39dd8774#31, 39dd8774#37, 39dd8774#39, 39dd8774#41, 39dd8774#42
+R1.3    ✓        direct          0.9    test_cases_*.json (#23-27) immediately followed by per-case file
+                                        creation (#29/#30) and live execution (#31/#37) + dispatch (#54-56),
+                                        no user-confirmation interrupt in between.
+        cites: 39dd8774#23, 39dd8774#24, 39dd8774#25, 39dd8774#27, 39dd8774#31
+CTRL2   ✗        none            0.0    [control] no aws/s3 calls in command-head stats; anchors s3://,
+                                        aws s3 cp, s3api all zero. S3 archive upload confirmed absent.</div>
+      <div class="lab">Output</div>
+      <div>
+        <span class="verdict">PASS / WEAK / FAIL / INVALID</span>
+        <span class="verdict">Completion</span>
+        <span class="verdict">Evidence level</span>
+        <span class="verdict">Overclaims</span>
+      </div>
+    </div>
+  </details>
+
+  <!-- 3. Efficiency Eval -->
+  <details style="--c:var(--eff)">
+    <summary>
+      <span class="tag">Efficiency Eval</span>
+      <span class="title">Was this run worth what it cost?</span>
+      <span class="q">Not about correctness — about time, compute, and redundancy</span>
+      <div class="preview">
+        <div class="pline"><b class="key">Segment</b><span>Auto-segments the run into task segments anchored by prompts (s2)</span></div>
+        <div class="pline"><b class="key">Ledger</b><span>Per segment: <b>duration · credits · cycles · LLM reqs · ctx%</b> (s3)</span></div>
+        <div class="pline"><b class="key">Duplication</b><span><b>MinHash + embedding multi-dim voting</b> finds duplicate action pairs (s4) + embedding cache</span></div>
+        <div class="pline"><b class="key">Grading</b><span>Grades each segment by <code>credits/turn</code> (s8)</span></div>
+      </div>
+      <div class="foot">
+        <span class="chip">Segment ledger</span>
+        <span class="chip">Duplicate pairs</span>
+        <span class="chip">Efficiency grade</span>
+        <span class="mod"><code>efficiency/</code></span>
+      </div>
+    </summary>
+    <div class="body">
+      <div class="lab">Questions it answers</div>
+      <ul>
+        <li>How many credits / turns / seconds did each <b>task segment</b> cost?</li>
+        <li>Are there <b>duplicate actions</b> (reading the same file 5 times, re-skinned commands, resent requests)?</li>
+        <li>Which segment has an abnormally high <code>credits/turn</code>?</li>
+        <li>Is context usage approaching the window limit?</li>
+        <li>Is the LLM request count out of control?</li>
+      </ul>
+      <div class="lab">Similarity voting (s4)</div>
+      <ul>
+        <li><b>Command-strong</b>: fingerprint of the shell command after stripping noise</li>
+        <li><b>Path similarity</b>: Jaccard overlap of touched paths</li>
+        <li><b>Semantic similarity</b>: embedding + MinHash</li>
+        <li>If any dimension passes threshold → marked as duplicate with a reason</li>
+      </ul>
+      <div class="lab">Infrastructure</div>
+      <ul>
+        <li><b>embed_cache.py</b>: cross-run embedding cache</li>
+        <li><b>evidence/canonicalize.py</b>: shell command unwrapping + structure_hash to denoise before comparison</li>
+      </ul>
+      <div class="lab">Example</div>
+      <div class="cmd">python3 -m efficiency.runner all &lt;session-id&gt; --official-dir ~/.kiro/sessions/cli --out report.json</div>
+      <div class="lab">Sample final report (s9 aggregated JSON)</div>
+      <div class="cmd">{
+  "verdict": "C",
+  "totals": {
+    "wall_hours": 192.1, "net_hours": 5.5, "work_ratio_pct": 2.9,
+    "credits": 2180, "llm_reqs": 1036, "cycles": 831, "compactions": 1
+  },
+  "counts": {
+    "n_segments": 7, "stuck_turns": 7,
+    "duplicate_groups_normalized": 2,
+    "wasted_reads": 31, "multi_write_files": 39
+  },
+  "worst_turn": {
+    "turn": 30, "dur_s": 1554, "cycles": 57,
+    "credits": 102.1, "share_of_total_credits_pct": 4.7
+  },
+  "recommendations": [
+    "turn 30 single-handedly cost 5% of total credits (1554s / 102 credits / 57 cycles) — worth decomposing...",
+    "AUTHORING.md rewritten 19 times, rules_dsl.py 17 times — spec thrash, consider a design review...",
+    "31 read_file calls with no reference in the next 20 steps — early-stage package scanning...",
+    "ctx peaked at 84.9%, only 1 compaction — context management healthy..."
+  ]
+}</div>
+      <div class="lab">Output</div>
+      <div>
+        <span class="verdict">Segment ledger</span>
+        <span class="verdict">Duplicate pairs</span>
+        <span class="verdict">Efficiency grade</span>
+        <span class="verdict">Segment grading</span>
+      </div>
+    </div>
+  </details>
+
+  <!-- 4. Visualization -->
+  <details style="--c:var(--graph)">
+    <summary>
+      <span class="tag">Visualization</span>
+      <span class="title">What actually happened during this run?</span>
+      <span class="q">No verdict — just help the reader see the process and data flow</span>
+      <div class="preview">
+        <div class="pline"><b class="key">Model</b><span><b>Provenance Graph</b>: bipartite graph of activities ↔ entities (4 edge kinds)</span></div>
+        <div class="pline"><b class="key">Views</b><span>Per-turn folded overview + <b>interactive single-page HTML</b>, scales to 437 nodes / 36 turns</span></div>
+        <div class="pline"><b class="key">Parsing</b><span><b>Shell AST</b> extracts read/write intent from command text, not just read_file</span></div>
+        <div class="pline"><b class="key">Export</b><span><b>OTLP/JSON</b> → Jaeger / Tempo; <b>DOT/JSON</b> → Graphviz</span></div>
+      </div>
+      <div class="foot">
+        <span class="chip">HTML page</span>
+        <span class="chip">DOT / JSON</span>
+        <span class="chip">OTLP</span>
+        <span class="mod"><code>graph/</code> + <code>normalize/</code></span>
+      </div>
+    </summary>
+    <div class="body">
+      <div class="lab">Questions it answers</div>
+      <ul>
+        <li>What did each turn do, and what did it produce?</li>
+        <li>How does <b>data flow</b> between turns?</li>
+        <li>Which action generated this artifact, and who used it afterward?</li>
+        <li>When debugging a FAIL verdict, which step didn't register?</li>
+        <li>How do I view the timing in Jaeger / Tempo?</li>
+      </ul>
+      <div class="lab">Core capabilities</div>
+      <ul>
+        <li><b>Activity / Entity / Edge</b> model with CERTAIN / LIKELY / WEAK confidence</li>
+        <li>Edge kinds: <code>used_by</code> / <code>generated_by</code> / <code>connected_by</code> / <code>informed_by</code></li>
+        <li><b>Per-turn folding</b>: keep only entities shared across turns, drop local noise</li>
+        <li><b>Shell AST</b>: parses <code>cat</code> / <code>cp</code> / <code>&gt;</code> / <code>tee</code> / python I/O for read/write intent</li>
+        <li><b>Per-turn thinking</b>: the agent's own reasoning is surfaced on each turn card</li>
+      </ul>
+      <div class="lab">Export targets</div>
+      <ul>
+        <li>Single-page HTML (open in a browser)</li>
+        <li>DOT / JSON (feed Graphviz or custom pipelines)</li>
+        <li>OTLP/JSON (feed Jaeger / Tempo / otel-collector)</li>
+      </ul>
+      <div class="lab">Example</div>
+      <div class="cmd">python3 -m graph.cli &lt;session-id&gt; --html out.html
+python3 -m normalize.cli export-otel &lt;session-id&gt; --out t.json</div>
+      <div class="lab">Sample output (text format, --stats + first few activities)</div>
+      <div class="cmd">session_id: 39dd8774-4f45-4798-8f90-32dc087359a8
+activities: 65
+entities: 53
+edges: 71
+edges_by_kind: {'usedBy': 35, 'generatedBy': 36}
+edges_by_confidence: {'likely': 71}
+isolated_activities: 14
+
+[turn 1, ≥weak]  65 activities / 53 entities / 71 edges
+  a[  3]  Read the main dlphy-mct agent config
+           ← dlphy-mct.json                      [likely]
+  a[  8]  Resolve and read orchestrator prompt
+           ← dlphy-mct-orchestrator.md           [likely]
+  a[ 11]  Read the workflow spec header
+           ← dlphy-mct-workflow.md               [likely]
+  a[ 18]  Read security baseline
+           ← security_baseline.json              [likely]</div>
+      <div class="lab">Output</div>
+      <div>
+        <span class="verdict">HTML page</span>
+        <span class="verdict">DOT / JSON</span>
+        <span class="verdict">OTLP</span>
+      </div>
+    </div>
+  </details>
+
+</div>
+
+</body>
+</html>

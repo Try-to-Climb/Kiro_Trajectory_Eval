@@ -37,7 +37,9 @@ from normalize import mapping
 
 from . import keys
 
-__all__ = ["available", "extract", "skipped_paths", "ParseFailure"]
+__all__ = ["available", "extract", "skipped_paths", "weak_paths",
+           "hosts_touched",
+           "ParseFailure"]
 
 
 class ParseFailure(RuntimeError):
@@ -491,12 +493,31 @@ class _Walker:
     """
 
     def __init__(self, data: bytes, working_dir: Optional[str],
-                 session_env: Optional[Mapping[str, str]]):
+                 session_env: Optional[Mapping[str, str]],
+                 local_names: Optional[set[str]] = None):
         self.data = data
         self.wd = working_dir
         self.env: dict[str, str] = dict(session_env or {})
+        # Variable names ever locally assigned anywhere in this run. Needed
+        # by DESIGN §7.13: a `$VAR` whose name is in this set may be reassigned
+        # at any time, so keeping it as a placeholder entity would merge
+        # unrelated files (`stale value is worse than none`, §7.10). A name
+        # NOT in this set is treated as a stable process-env global, and the
+        # unexpanded literal becomes a WEAK-confidence entity so shell-bridge
+        # agents (ft-fixup's `$KIRO_HOME/scripts/x.sh`) still produce a graph.
+        self.local_names: Optional[frozenset[str]] = (
+            None if local_names is None else frozenset(local_names))
         self.out: dict[tuple[str, str], str] = {}
+        # Paths kept as their variable literal (`$KIRO_HOME/x.sh`) because the
+        # value could not be resolved but the name is a stable global. Carried
+        # separately from `out` so `build.py` can attach them at WEAK confidence
+        # without changing the shape of the main return. See DESIGN §7.13.
+        self.weak: dict[tuple[str, str], str] = {}
         self.executed: set[str] = set()
+        # Hosts a command reached: (host_key, evidence). A set-like dict keeps the
+        # first evidence a host was named for and drops the duplicate when the
+        # same action lists the same host twice (`scp a user@h:b user@h:c`).
+        self.hosts: dict[str, str] = {}
         # Paths deliberately not claimed, so the gap is visible rather than
         # looking like an action that touched nothing.
         self.skipped: list[str] = []
@@ -525,9 +546,23 @@ class _Walker:
         if "$" in lit:
             expanded = keys.expand_vars(lit, self.env)
             if expanded is None:
-                # Recorded rather than dropped in silence. Without this the
-                # activity simply looks isolated, and `(isolated)` on its own is
-                # not information -- the reason is.
+                # DESIGN §7.13: before giving up, see if this is a *stable
+                # global* (no name is ever locally reassigned in this run). If
+                # so, keep the variable literal as a WEAK-confidence placeholder
+                # entity so shell-bridge agents (`$KIRO_HOME/scripts/x.sh`) do
+                # not vanish from the graph. Local variables (`LOGFILE=$(...)`)
+                # continue to skip -- a stale value is worse than none.
+                #
+                # `local_names=None` is the opt-out contract for callers that
+                # cannot or do not want to classify names; they get the old
+                # conservative behaviour (always skip). The build pipeline opts
+                # in by passing the pre-scanned set.
+                if self.local_names is not None:
+                    refs = keys.referenced_names(lit)
+                    if refs and refs.isdisjoint(self.local_names):
+                        self.weak.setdefault((lit, direction),
+                            f"{why} (variable path; value unresolved, treated as global)")
+                        return
                 self.skipped.append(
                     (lit, "variable value never stated in the run"))
                 return
@@ -549,12 +584,64 @@ class _Walker:
             expanded = keys.expand_vars(probe, self.env)
             if expanded is None:
                 if keys.is_variable_reference(probe) or keys.looks_like_path(probe):
+                    # DESIGN §7.13: promote to WEAK placeholder if the names
+                    # are all stable globals; otherwise record the gap. The
+                    # `local_names=None` opt-out keeps the old conservative
+                    # behaviour for callers that did not classify names.
+                    if self.local_names is not None:
+                        refs = keys.referenced_names(probe)
+                        if refs and refs.isdisjoint(self.local_names) \
+                                and keys.looks_like_path(probe):
+                            self.weak.setdefault((probe, direction),
+                                f"{why} (variable path; value unresolved, treated as global)")
+                            return
                     self.skipped.append(
                         (probe, "variable value never stated in the run"))
                 return
             probe = expanded
         if keys.looks_like_path(probe):
             self.claim(literal, direction, why)
+
+    # ---- host contact ------------------------------------------------
+    #
+    # These verbs reach out to a remote endpoint. The payload (what runs on the
+    # other side) is not parsed -- the remote shell is often not bash, and more
+    # than one real session used Windows CMD syntax inside the quotes. The
+    # endpoint itself is still worth a node: a reader of the graph can see
+    # which run touched which host, which docker container, which pod.
+
+    def _host_from_rsync_scp(self, tok: str) -> Optional[str]:
+        """Extract `user@host` from an scp/rsync argument.
+
+        A positional is a remote endpoint when it contains a `:` that is not
+        inside a path (`/etc:x` is a file, so the `:` has to come before the
+        first `/`). Options are already excluded by the caller.
+        """
+        probe = _unquote(tok)
+        if "$" in probe:                 # `scp $DST:...` -- host runtime-only
+            return None
+        colon = probe.find(":")
+        slash = probe.find("/")
+        if colon <= 0 or (0 <= slash < colon):
+            return None
+        return probe[:colon]
+
+    def claim_host(self, key: str, why: str) -> None:
+        """Record contact with an external endpoint.
+
+        `key` has the shape `<scheme>://<endpoint>`. Keys with unresolved
+        `$VAR` segments are refused (recorded in `skipped`) rather than
+        emitted: an edge keyed on a literal variable name would conflate
+        every ssh under that variable into one node.
+        """
+        if not key or "://" not in key:
+            return
+        scheme, _, ep = key.partition("://")
+        if not ep or "$" in ep:
+            self.skipped.append((key, "endpoint uses a value the command text "
+                                      "does not carry"))
+            return
+        self.hosts.setdefault(key, why)
 
     # ---- tree traversal ----------------------------------------------
     def walk(self, node) -> None:
@@ -722,7 +809,6 @@ class _Walker:
             n = n.parent
         return True
 
-
     def command(self, node) -> None:
         raw_name, raw_args = self._args(node)
         redirects = []
@@ -814,6 +900,99 @@ class _Walker:
                                          "read from the command text"))
             return
         if base in IGNORED_NAMES:
+            return
+
+        # Reaching out to a remote endpoint. The command on the other side is
+        # not parsed -- the remote shell may not be bash, and in one real
+        # session it was Windows CMD -- but the endpoint itself is a node, so a
+        # reader can see which turn touched which host / container / pod.
+        if base == "sshpass":
+            # `sshpass -p PASS ssh ...`. Not a `WRAPPERS` entry because the
+            # password after `-p` is an arbitrary string that `peel_wrappers`
+            # would pick as the next verb (`-p 'pass' ssh host` → verb=pass).
+            # Instead, find the inner verb and fall through as if it had been
+            # the base.
+            inner = next((a for a in args
+                          if _unquote(a).rsplit("/", 1)[-1]
+                             in {"ssh", "scp", "rsync"}), None)
+            if inner is None:
+                return
+            inner_name = _unquote(inner).rsplit("/", 1)[-1]
+            inner_args = args[args.index(inner) + 1:]
+            base, name, args = inner_name, inner, inner_args
+            positional = [a for a in args if not a.startswith("-")]
+
+        if base == "ssh":
+            # The first positional that isn't an option value is the host.
+            # Two shapes to skip:
+            #   `-o KEY=VAL`   leaves `KEY=VAL` as a positional; the `=`
+            #                  tells it apart from an endpoint.
+            #   `-p 29418`     leaves `29418` as a positional with nothing
+            #                  on it to tell it apart. Walk `args` instead,
+            #                  consuming one value after each option that
+            #                  takes one.
+            if "-G" in args:                        # config query, no connection
+                return
+            VALUE_OPTS = {"-o", "-p", "-i", "-l", "-F", "-E", "-c", "-b",
+                          "-m", "-O", "-Q", "-S", "-J", "-D", "-L", "-R",
+                          "-W", "-w"}
+            host = None
+            port = ""
+            skip_next = False
+            for i, a in enumerate(args):
+                if skip_next:
+                    if args[i - 1] == "-p":
+                        port = f":{a}"
+                    skip_next = False
+                    continue
+                if a in VALUE_OPTS:
+                    skip_next = True
+                    continue
+                if a.startswith("-"):               # bundled flag like `-vv`
+                    continue
+                if "=" in a and host is None:       # a stray KEY=VAL value
+                    continue
+                host = a
+                break
+            if host:
+                self.claim_host(f"ssh://{_unquote(host)}{port}",
+                                f"argument of {base}")
+            return
+        if base in {"scp", "rsync"}:
+            for a in positional:
+                h = self._host_from_rsync_scp(a)
+                if h:
+                    self.claim_host(f"ssh://{h}", f"argument of {base}")
+            return
+        if base == "docker" and positional:
+            sub, rest = positional[0], positional[1:]
+            if sub == "exec" and rest:
+                self.claim_host(f"docker://{_unquote(rest[0])}",
+                                f"argument of docker {sub}")
+            elif sub == "cp" and rest:
+                # `docker cp <container>:/src /dst`  or the reverse.
+                for a in rest:
+                    probe = _unquote(a)
+                    if ":" in probe and "/" not in probe.split(":")[0]:
+                        self.claim_host(f"docker://{probe.split(':')[0]}",
+                                        f"argument of docker {sub}")
+                        break
+            return
+        if base == "kubectl" and positional:
+            sub, rest = positional[0], positional[1:]
+            if sub == "exec" and rest:
+                pod = next((a for a in rest if not a.startswith("-")
+                            and a != "--"), None)
+                if pod:
+                    self.claim_host(f"k8s://{_unquote(pod)}",
+                                    f"argument of kubectl {sub}")
+            elif sub == "cp" and rest:
+                for a in rest:
+                    probe = _unquote(a)
+                    if ":" in probe and "/" not in probe.split(":")[0]:
+                        self.claim_host(f"k8s://{probe.split(':')[0]}",
+                                        f"argument of kubectl {sub}")
+                        break
             return
 
         # `git diff x.md`, `git show y`: the subcommand carries the meaning.
@@ -1194,12 +1373,18 @@ def _collect_executed(node, data: bytes, working_dir: Optional[str],
 
 
 def extract(command: str, working_dir: Optional[str] = None,
-            session_env: Optional[Mapping[str, str]] = None
+            session_env: Optional[Mapping[str, str]] = None,
+            local_names: Optional[set[str]] = None
             ) -> list[tuple[str, str, str]]:
     """Paths a command touches, as `(absolute_path, direction, evidence)`.
 
     Same contract as `keys.extract`, so the two can be compared on the gold set
     and swapped behind one flag.
+
+    `local_names` lists every variable name reassigned anywhere in the run;
+    used by DESIGN §7.13 to decide which unresolved `$VAR` references stay as
+    WEAK placeholder entities (globals) and which get skipped (locals). The
+    weak set is returned via `weak_paths()`, parallel to `skipped_paths()`.
 
     Raises `ParseFailure` when the text is not valid enough shell to build a
     tree -- 1.5% of 1751 measured commands, mostly very long Python heredocs --
@@ -1214,11 +1399,13 @@ def extract(command: str, working_dir: Optional[str] = None,
     if tree.root_node.has_error:
         raise ParseFailure("tree-sitter reported a syntax error")
 
-    walker = _Walker(data, working_dir, session_env)
+    walker = _Walker(data, working_dir, session_env, local_names)
     _collect_executed(tree.root_node, data, working_dir, walker.executed)
     walker.walk(tree.root_node)
     _LAST_SKIPPED[:] = walker.skipped
+    _LAST_WEAK[:] = [(p, d, why) for (p, d), why in walker.weak.items()]
     _LAST_SPLIT[:] = walker.split
+    _LAST_HOSTS[:] = [(k, why) for k, why in walker.hosts.items()]
     return [(p, d, why) for (p, d), why in walker.out.items()]
 
 
@@ -1226,7 +1413,20 @@ def extract(command: str, working_dir: Optional[str] = None,
 # A return value would be cleaner, but `keys.extract` defines the contract both
 # implementations share and changing it would ripple through every caller.
 _LAST_SKIPPED: list[str] = []
+_LAST_WEAK: list[tuple[str, str, str]] = []
 _LAST_SPLIT: list[dict[str, Any]] = []
+_LAST_HOSTS: list[tuple[str, str]] = []
+
+
+def weak_paths() -> list[tuple[str, str, str]]:
+    """Variable-form paths kept as WEAK placeholder entities (DESIGN §7.13).
+
+    Each item is `(literal, direction, evidence)` with the literal still
+    containing `$VAR`. Build-side consumers should attach them at WEAK
+    confidence so a reader can distinguish them from edges backed by a
+    resolved absolute path.
+    """
+    return list(_LAST_WEAK)
 
 
 def last_split() -> list[dict[str, Any]]:
@@ -1248,6 +1448,16 @@ def last_split() -> list[dict[str, Any]]:
 def skipped_paths() -> list[str]:
     """Paths the last `extract` saw and deliberately refused to resolve."""
     return list(_LAST_SKIPPED)
+
+
+def hosts_touched() -> list[tuple[str, str]]:
+    """`(host_key, evidence)` for every remote endpoint the last `extract` saw.
+
+    `host_key` is `<scheme>://<endpoint>` -- `ssh://user@h`, `docker://<cid>`,
+    `k8s://<pod>`. The payload that would run on the far side is not parsed;
+    the node answers "which turn touched which host" and nothing more.
+    """
+    return list(_LAST_HOSTS)
 
 
 

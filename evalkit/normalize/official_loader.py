@@ -1,31 +1,32 @@
-"""Build a TraceIR directly from Kiro's official session record.
+"""Build a TraceIR directly from a Kiro official session record.
 
 Why this loader exists:
     The official record (`$KIRO_HOME/sessions/cli/<sid>.json{,l}`) is a
-    better data source than the hook trace for **offline trajectory
-    evaluation** — tool names are modern (no alias folding needed), results
-    are structured (Success/Error; no need to infer success from "post
-    presence"), it contains every assistant message plus thinking, and it
-    carries tokens/cost/context usage. Parent and child agents are also
-    naturally in separate session files, avoiding the hook's KIRO_SESSION_ID
-    directory-mixing problem.
+    better source for **offline trajectory evaluation** than the hook trace
+    -- tool names use the modern convention (no alias folding needed),
+    results are structured (Success/Error, no need to guess success/fail
+    from "post present or not"), it includes every assistant message plus
+    thinking, and it carries token / cost / context usage. Parent and child
+    agents naturally live in separate session files, so the hook's
+    KIRO_SESSION_ID directory-sharing problem does not apply.
 
-    Three things the hook trace remains irreplaceable for (see README):
-    operations blocked by policy, precise millisecond timing for each call,
-    and real-time observation. So both loaders coexist: evaluation uses the
-    official record, auditing uses the hook.
+    Three things the hook trace is still irreplaceable for (see README):
+    policy-blocked operations, precise millisecond timing of each call, and
+    live tailing. So both loaders coexist: evaluation uses official,
+    auditing uses hook.
 
-The produced TraceIR is **isomorphic** to the hook version, reusing the same
-fan-out / semantic mapping / run/turn logic; downstream rule engines and the
-agentevals adapter do not need to distinguish sources.
+    The TraceIR produced here is **isomorphic** to the hook version,
+    reusing the same fan-out / semantic mapping / run/turn logic, so the
+    downstream rule engine and agentevals adapter do not need to know which
+    source they got.
 
-.jsonl structure (measured):
-    One object per line, kind ∈ {Prompt, AssistantMessage, ToolResults}
-      Prompt          data.content[].data is the user's input text
-      AssistantMessage data.content[] each item kind ∈ {text, thinking, toolUse}
-                       one message can contain multiple toolUse entries (parallel; up to 4 measured)
-      ToolResults     data.results is a {toolUseId: {tool, result}} dict
-                       result is {"Success":{...}} or {"Error":{...}}
+.jsonl structure (empirical):
+    one object per line, kind in {Prompt, AssistantMessage, ToolResults}
+      Prompt            data.content[].data is user input text
+      AssistantMessage  each data.content[] has kind in {text, thinking, toolUse}
+                        one message may hold multiple toolUses (parallel; up to 4 observed)
+      ToolResults       data.results is a {toolUseId: {tool, result}} dict,
+                        where result is {"Success": {...}} or {"Error": {...}}
 """
 
 from __future__ import annotations
@@ -45,13 +46,13 @@ def _tool_input(tooluse_data: dict) -> dict:
 
 
 def _result_status(result_entry: dict) -> tuple[bool, Optional[str]]:
-    """Return (success, error_message).
+    """Return (success, error-message).
 
-    Only an explicit Error counts as failure. A null result, or a non-
-    Success/Error shape (e.g. summary and similar reporting tools that
-    produce no standard result), counts as success — otherwise a normal
-    summary would be misjudged as failed (measured on 8adaa334, whose
-    summary has result=null).
+    Only an explicit Error counts as failure. A null result or one that is
+    neither Success nor Error (e.g. a reporting tool like `summary` that
+    does not produce a standard result) is treated as success -- otherwise
+    a legitimate summary would be misjudged as a failure (observed:
+    sessions where the summary tool returns result=null).
     """
     r = (result_entry or {}).get("result")
     if isinstance(r, dict) and "Error" in r:
@@ -69,7 +70,7 @@ def _result_size(result_entry: dict) -> Optional[int]:
 
 
 def _result_content(result_entry: dict) -> Optional[str]:
-    """Full tool response text, serialized to a string. Called only when include_responses is set."""
+    """Full tool response text, serialized. Only called when include_responses is on."""
     r = (result_entry or {}).get("result")
     if r is None:
         return None
@@ -86,12 +87,12 @@ def load_trace_from_official(session_id: str,
                              include_responses: bool = False) -> TraceIR:
     """Build a TraceIR from the official session record.
 
-    include_responses: whether to fill Action.response with the full tool
-        response text (**default False**, because responses can be entire
-        files/command outputs and huge).
+    include_responses: whether to fill the full tool reply into
+        Action.response (**default False**, since a reply can be a whole
+        file or command output and the size may be huge).
     """
     base = official_dir or default_official_dir()
-    rec = load_official(session_id, base)          # reuse metadata parsing (agent/usage/cost)
+    rec = load_official(session_id, base)          # reuse the metadata parse (agent / usage / credits)
     jl_path = os.path.join(base, f"{session_id}.jsonl")
 
     ir = TraceIR(session_id=session_id, source=jl_path)
@@ -102,8 +103,8 @@ def load_trace_from_official(session_id: str,
         ir.warnings.append(f"official jsonl does not exist: {jl_path}")
         return ir
 
-    # In the official record child agents are stored in separate files;
-    # the hook's directory-mixing problem does not exist.
+    # in the official record each sub-agent is a separate file, so the
+    # hook-side directory-sharing problem does not apply here
     ir.run_count = 1
 
     turn = 0
@@ -118,7 +119,7 @@ def load_trace_from_official(session_id: str,
         try:
             rec_obj = json.loads(line)
         except json.JSONDecodeError:
-            warnings.append("official jsonl has line parse failures, skipped")
+            warnings.append("official jsonl: some lines failed to parse, skipped")
             continue
 
         kind = rec_obj.get("kind")
@@ -135,16 +136,22 @@ def load_trace_from_official(session_id: str,
             ts = str((data.get("meta") or {}).get("timestamp", ""))
 
         elif kind == "AssistantMessage":
-            # Collect the final text in this message (as part of the turn's response)
+            # collect the final text from this message (as part of the turn's reply)
             final_text = "".join(
                 c.get("data", "") if isinstance(c.get("data"), str)
                 else (c.get("data", {}).get("text", "") if isinstance(c.get("data"), dict) else "")
                 for c in (data.get("content") or []) if c.get("kind") == "text")
             if final_text:
                 ir.responses.append(final_text)
+                # Mirror the append into the per-turn index so a reader of the
+                # graph can show "assistant replied" alongside "user asked"
+                # for the right turn. `turn` here is the one bumped by the
+                # most recent Prompt above.
+                ir.responses_by_turn.setdefault(turn, []).append(final_text)
 
-            # This message's thinking: attributed to every toolUse action that this message produces.
-            # One message can contain multiple parallel toolUse entries; they share the same thinking.
+            # the thinking from this message is attributed to every toolUse
+            # action it produces. A message can contain several parallel
+            # toolUses that share one thinking segment.
             msg_thinking = "".join(
                 _content_text(c) for c in (data.get("content") or [])
                 if c.get("kind") == "thinking")
@@ -160,7 +167,7 @@ def load_trace_from_official(session_id: str,
                 td = c.get("data") or {}
                 tool = td.get("name") or "unknown"
                 args = _tool_input(td)
-                # Reuse the hook version's fan-out + semantic mapping
+                # reuse the hook-side fan-out + semantic mapping
                 parts = _expand_from_tool(tool, args, warnings)
                 for op_idx, part in enumerate(parts):
                     ir.actions.append(Action(
@@ -176,7 +183,7 @@ def load_trace_from_official(session_id: str,
                         pattern=part.get("pattern"),
                         purpose=(args.get("__tool_use_purpose") if isinstance(args, dict) else None),
                         reasoning=msg_thinking,
-                        completed=True,          # tentative; back-filled below from ToolResults
+                        completed=True,          # tentative; back-filled from ToolResults below
                         blocked=False,
                         args=args,
                         tool_use_id=td.get("toolUseId"),
@@ -222,7 +229,7 @@ def _canonical(tool: str) -> str:
 
 def iter_official_sessions(official_dir: Optional[str] = None,
                            cwd_filter: Optional[str] = None):
-    """List session ids from the official records (those with a .jsonl); optional cwd filter."""
+    """List session ids from the official records (those with a .jsonl), with optional cwd filter."""
     base = official_dir or default_official_dir()
     if not os.path.isdir(base):
         return

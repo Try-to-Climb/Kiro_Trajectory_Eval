@@ -218,5 +218,73 @@ class TestVersionChainRendering(unittest.TestCase):
             self.assertIn("modify_file", step)
 
 
+class TestAProbeIsRecordedWithoutAnEdge(unittest.TestCase):
+    """`grep`, `find`, `ls`, LSP symbol queries look at a target without
+    necessarily touching it. The target is still worth showing on the card so
+    a reader can see what was asked, but the edge is withheld: a probe that
+    misses touches nothing, and claiming otherwise fabricates reads a judge
+    has already called out twice on the ExampleCorpus corpus.
+    """
+
+    def test_search_content_fills_pattern_and_path(self):
+        act = _a(1, "search_content", turn=1)
+        act["args"] = {"pattern": "iperf|downlink",
+                       "path": "/proj/x/engines/scenario.py"}
+        g = build_skeleton([act])
+        activity = g.activities["a:a1b2c3d4#1"]
+        self.assertEqual(activity.probe,
+                         {"pattern": "iperf|downlink",
+                          "path": "/proj/x/engines/scenario.py"})
+
+    def test_list_dir_fills_path_only(self):
+        act = _a(2, "list_dir", turn=1)
+        act["args"] = {"path": "/proj/x/engines"}
+        g = build_skeleton([act])
+        self.assertEqual(g.activities["a:a1b2c3d4#2"].probe,
+                         {"path": "/proj/x/engines"})
+
+    def test_code_search_symbols_fills_pattern_only(self):
+        act = _a(3, "code_search_symbols", turn=1)
+        act["args"] = {"pattern": "_step_iperf"}
+        g = build_skeleton([act])
+        self.assertEqual(g.activities["a:a1b2c3d4#3"].probe,
+                         {"pattern": "_step_iperf"})
+
+    def test_path_and_root_dedup_when_equal(self):
+        """normalize already copies `args.path` into `root` for grep, so a
+        probe held both and the card would have shown the same path twice."""
+        act = _a(4, "search_content", turn=1)
+        act["args"] = {"pattern": "x", "path": "/p/a.py"}
+        act["root"] = "/p/a.py"
+        g = build_skeleton([act])
+        self.assertEqual(g.activities["a:a1b2c3d4#4"].probe,
+                         {"pattern": "x", "path": "/p/a.py"})
+
+    def test_path_and_root_both_kept_when_different(self):
+        act = _a(5, "search_content", turn=1)
+        act["args"] = {"pattern": "x", "path": "/p/a.py", "root": "/p"}
+        g = build_skeleton([act])
+        self.assertEqual(g.activities["a:a1b2c3d4#5"].probe,
+                         {"pattern": "x", "path": "/p/a.py", "root": "/p"})
+
+    def test_a_non_probe_action_has_no_probe(self):
+        g = build_skeleton([_a(6, "read_file", "/p/a.py", turn=1)])
+        self.assertIsNone(g.activities["a:a1b2c3d4#6"].probe)
+
+    def test_probe_produces_no_edges(self):
+        """The point of the whole exercise: display information, not links.
+        A `search_content` on an existing file still leaves the activity
+        isolated."""
+        acts = [_a(1, "read_file", "/p/a.py", turn=1)]
+        probe = _a(2, "search_content", turn=1)
+        probe["args"] = {"pattern": "x", "path": "/p/a.py"}
+        acts.append(probe)
+        g = build_skeleton(acts)
+        probe_id = "a:a1b2c3d4#2"
+        self.assertFalse(
+            any(e.src == probe_id or e.dst == probe_id for e in g.edges),
+            "probe activity should have no edges")
+
+
 if __name__ == "__main__":
     unittest.main()

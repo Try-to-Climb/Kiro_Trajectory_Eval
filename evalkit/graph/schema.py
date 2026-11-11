@@ -37,9 +37,16 @@ from typing import Any, Iterator, Optional
 # ---------------------------------------------------------------------------
 GENERATED_BY = "generatedBy"      # activity → its output.  Always emitted, certain.
 USED_BY = "usedBy"                # entity → a later activity that consumes it.
+CONNECTED_BY = "connectedBy"      # host entity → activity that contacted it.
+                                   # Separate from `usedBy` so a reader can ask
+                                   # "did this run touch an external system"
+                                   # without having to list file paths. The host
+                                   # is at `born_idx = -1`: a host existed before
+                                   # the run and the time-order check accepts
+                                   # the edge for every activity that connects.
 INFORMED_BY = "informedBy"        # weak association; a candidate, not an assertion.
 
-EDGE_KINDS = (GENERATED_BY, USED_BY, INFORMED_BY)
+EDGE_KINDS = (GENERATED_BY, USED_BY, CONNECTED_BY, INFORMED_BY)
 
 # ---------------------------------------------------------------------------
 # Confidence -- mirrors the evidence grading already used elsewhere in the
@@ -77,6 +84,17 @@ class Activity:
     # requires it.
     command: Optional[str] = None
     path: Optional[str] = None
+    # Wall-clock milliseconds this one tool call took, from the official
+    # record. Summed per turn (and across all turns, for the overview) to
+    # show "where the time went" without having to open each action.
+    duration_ms: Optional[int] = None
+    # What a probe action looked for -- `grep`, `find`, `ls`, LSP symbol
+    # queries. A `dict` with any of `pattern`, `path`, `root`. Deliberately
+    # not an edge: a probe that misses touches nothing, so claiming it did
+    # would be a fabrication. The field is here so a reader of the picture
+    # can still see what the probe was aimed at (which is often why the
+    # action is on the graph at all) without crawling the raw session.
+    probe: Optional[dict[str, Any]] = None
 
     @property
     def node_id(self) -> str:
@@ -101,7 +119,7 @@ class Entity:
     """
     key: str
     version: int = 0
-    kind: str = "file"            # file / log / pid / url / dir / value
+    kind: str = "file"            # file / log / pid / url / dir / value / host
     producer_ref: Optional[str] = None
     born_idx: int = -1            # idx of the producing activity; -1 = pre-existing
 
@@ -110,6 +128,16 @@ class Entity:
         return f"e:{self.key}@v{self.version}"
 
     def label(self, cap: int = 40) -> str:
+        if self.kind == "host":
+            # `ssh://user@h` is a key, not something a reader wants in a card.
+            # The scheme carries the protocol (ssh / docker / k8s) and the rest
+            # is the endpoint identity; both are kept, separated for the eye.
+            scheme, _, endpoint = self.key.partition("://")
+            tag = scheme or "host"
+            base = endpoint or self.key
+            if len(base) > cap:
+                base = "…" + base[-(cap - 1):]
+            return f"{tag}: {base}"
         base = self.key.rsplit("/", 1)[-1] or self.key
         if len(base) > cap:
             base = "…" + base[-(cap - 1):]
@@ -198,6 +226,8 @@ class ProvGraph:
             raise GraphError(f"{GENERATED_BY} must run activity → entity")
         if kind == USED_BY and src_is_a:
             raise GraphError(f"{USED_BY} must run entity → activity")
+        if kind == CONNECTED_BY and src_is_a:
+            raise GraphError(f"{CONNECTED_BY} must run entity → activity")
 
         self._check_time_order(src, dst)
         self._check_no_reverse(src, dst)

@@ -38,9 +38,11 @@ from . import keys, shell_ast
 from .keys import extract_from_action
 from .schema import (
     CERTAIN,
+    CONNECTED_BY,
     GENERATED_BY,
     LIKELY,
     USED_BY,
+    WEAK,
     Activity,
     Entity,
     ProvGraph,
@@ -81,7 +83,50 @@ def _ref_of(a: Mapping[str, Any]) -> str:
     return f"{sid[:8]}#{a.get('idx')}"
 
 
+# Actions that look at a target without necessarily touching it. The target
+# is still worth showing on the card so a reader can see what was asked; the
+# edge decision stays conservative, because a probe that misses touches
+# nothing and claiming otherwise fabricates reads.
+_PROBE_ACTIONS = frozenset({
+    "search_content", "search_files", "list_dir", "code_search_symbols",
+})
+
+
+def _probe_of(a: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """`{pattern, path, root}` for a probe action, else None.
+
+    The three fields are the ones the probe tools share: `pattern` is what
+    was looked for, `path` and `root` are where. Any one of them absent is
+    normal -- `list_dir` has only `path`, `code_search_symbols` has only
+    `pattern`.
+    """
+    if a.get("action") not in _PROBE_ACTIONS:
+        return None
+    args = a.get("args") or {}
+    probe = {}
+    pat = a.get("pattern") or args.get("pattern") or args.get("query")
+    pth = a.get("path") or args.get("path")
+    root = a.get("root") or args.get("root") or args.get("directory")
+    if pat:
+        probe["pattern"] = str(pat)
+    if pth:
+        probe["path"] = str(pth)
+    if root and str(root) != probe.get("path"):
+        # Normalize already copies `args.path` into both `path` and `root` on
+        # search_content, so a probe shows the same string twice without this.
+        # `root` is only meaningful when it names a directory the search ran
+        # under while `path` points elsewhere -- rare, but the field is kept
+        # for when it happens.
+        probe["root"] = str(root)
+    return probe or None
+
+
 def _activity_of(a: Mapping[str, Any]) -> Activity:
+    dur = a.get("duration_ms")
+    try:
+        dur = int(dur) if dur is not None else None
+    except (TypeError, ValueError):
+        dur = None
     return Activity(
         ref=_ref_of(a),
         idx=int(a.get("idx", -1)),
@@ -91,6 +136,8 @@ def _activity_of(a: Mapping[str, Any]) -> Activity:
         reasoning=a.get("reasoning") or None,
         command=a.get("command") or None,
         path=a.get("path") or None,
+        probe=_probe_of(a),
+        duration_ms=dur,
     )
 
 
@@ -176,17 +223,16 @@ def build_skeleton(actions: Iterable[Mapping[str, Any]],
 def command_cwd(a: Mapping[str, Any]) -> Optional[str]:
     """The directory a command starts in, before any `cd` of its own.
 
-    Deliberately not `Action.cwd`. That field is normalize's fold of every
-    `cd` in the command -- where it ends up -- and the extractor folds them
-    again as it walks, so starting from the folded value counts each one
-    twice: `cd sub` under `/app` would resolve `out.txt` to
-    `/app/sub/sub/out.txt`.
+    Deliberately not `Action.cwd`. That field is normalize's fold of every `cd` in
+    the command -- where it ends up -- and the extractor folds them again as it
+    walks, so starting from the folded value counts each one twice:
+    `cd sub` under `/app` would resolve `out.txt` to `/app/sub/sub/out.txt`.
 
-    `working_dir` is often absent -- 182 of 269 commands in one session
-    carry a `cwd` and no `working_dir` -- and that is fine: those commands
-    open with an absolute `cd`, which needs no base. A command with only a
-    relative `cd` and no `working_dir` has no base at all, and then a
-    relative path is refused rather than resolved against a guess.
+    `working_dir` is often absent -- 182 of 269 commands in one session carry a
+    `cwd` and no `working_dir` -- and that is fine: those commands open with an
+    absolute `cd`, which needs no base. A command with only a relative `cd` and no
+    `working_dir` has no base at all, and then a relative path is refused rather
+    than resolved against a guess.
     """
     return (a.get("args") or {}).get("working_dir")
 
@@ -212,8 +258,11 @@ def carry_env(session_env: dict, command: str, response: Any = None) -> None:
         session_env[echoed[0]] = echoed[1]
 
 
-def _command_paths(a: Mapping[str, Any], session_env: Mapping[str, str]
-                   ) -> tuple[Iterable[tuple[str, str, str]], list[str]]:
+def _command_paths(a: Mapping[str, Any], session_env: Mapping[str, str],
+                   local_names: Optional[set[str]] = None
+                   ) -> tuple[Iterable[tuple[str, str, str]],
+                              list[str],
+                              list[tuple[str, str, str]]]:
     """Paths from a command's text, preferring the syntax tree.
 
     `shell_ast` answers the structural questions -- which command a token belongs
@@ -223,15 +272,20 @@ def _command_paths(a: Mapping[str, Any], session_env: Mapping[str, str]
     10.4% more edges. It cannot parse 1.5% of real commands, mostly very long
     Python heredocs, and those fall back to the regex path rather than silently
     yielding less.
+
+    Returns `(found, skipped, weak)` where `weak` holds variable-form paths kept
+    as WEAK placeholder entities per DESIGN §7.13; the regex fallback has no
+    equivalent facility and returns `weak=[]`.
     """
     command = a.get("command") or ""
     if command and shell_ast.available():
         try:
-            got = shell_ast.extract(command, command_cwd(a), session_env)
-            return got, shell_ast.skipped_paths()
+            got = shell_ast.extract(command, command_cwd(a), session_env,
+                                    local_names)
+            return got, shell_ast.skipped_paths(), shell_ast.weak_paths()
         except shell_ast.ParseFailure:
             pass
-    return extract_from_action(a, session_env), []
+    return extract_from_action(a, session_env), [], []
 
 
 def _connect_commands(g: ProvGraph, ordered: list[Mapping[str, Any]],
@@ -257,6 +311,14 @@ def _connect_commands(g: ProvGraph, ordered: list[Mapping[str, Any]],
     # a variable inherited from the process environment is otherwise unknowable
     # from the record, and one session states $KIRO_HOME that way four times.
     session_env: dict[str, str] = {}
+    # Names ever locally assigned in this run. Precomputed once so a `$VAR`
+    # used before the assignment is still classified correctly: a shell-bridge
+    # agent that defines `SESSION_DIR` in turn 2 should not get a stable-global
+    # placeholder for that name in turn 1. See DESIGN §7.13.
+    local_names: set[str] = set()
+    for a in ordered:
+        if (a.get("action") or "") == "run_command":
+            local_names |= keys.assigned_names(a.get("command") or "")
     for a in ordered:
         if (a.get("action") or "") != "run_command":
             continue
@@ -267,11 +329,24 @@ def _connect_commands(g: ProvGraph, ordered: list[Mapping[str, Any]],
         a_id = f"a:{ref}"
         idx = int(a.get("idx", -1))
 
-        found, skipped = _command_paths(a, session_env)
+        found, skipped, weak = _command_paths(a, session_env, local_names)
         for p, direction, evidence in found:
             _attach(g, a_id, ref, idx, p, direction, evidence, version)
+        for p, direction, evidence in weak:
+            _attach(g, a_id, ref, idx, p, direction, evidence, version,
+                    confidence=WEAK)
         for tok, reason in skipped:
             g.warnings.append(f"{ref}: skipped path {tok!r} ({reason})")
+
+        # Hosts the command reached. A host is pre-existing (`born_idx = -1`)
+        # and has no version -- it is an endpoint, not an artifact the run
+        # produced. The edge is `CONNECTED_BY` so a reader can distinguish
+        # "touched an external system" from "read a file" without crawling
+        # the key for a scheme prefix.
+        for host_key, evidence in shell_ast.hosts_touched():
+            e_id = g.add_entity(Entity(key=host_key, version=0, kind="host",
+                                       born_idx=-1))
+            g.add_edge(e_id, a_id, CONNECTED_BY, LIKELY, evidence)
 
         # Task 5: values only the recorded output can pin down.
         for p, direction, evidence in keys.resolve_from_action(a):
@@ -328,21 +403,27 @@ def _warn_unlinked_mentions(g: ProvGraph, ref: str, a_id: str,
 
 
 def _attach(g: ProvGraph, a_id: str, ref: str, idx: int, path: str,
-            direction: str, evidence: str, version: dict[str, int]) -> None:
-    """One command-derived dependency, as a LIKELY edge."""
+            direction: str, evidence: str, version: dict[str, int],
+            confidence: str = LIKELY) -> None:
+    """One command-derived dependency, as a LIKELY (or WEAK) edge.
+
+    `confidence` is `LIKELY` for resolved absolute paths; callers pass `WEAK`
+    for variable-form placeholder paths (DESIGN §7.13) so a reader can tell
+    them apart from edges backed by a fully resolved key.
+    """
     if direction == keys.WRITE:
         ver = version.get(path, 0) + 1
         version[path] = ver
         e_id = g.add_entity(Entity(key=path, version=ver,
                                    producer_ref=ref, born_idx=idx))
-        g.add_edge(a_id, e_id, GENERATED_BY, LIKELY, evidence)
+        g.add_edge(a_id, e_id, GENERATED_BY, confidence, evidence)
     else:
         if path not in version:
             g.add_entity(Entity(key=path, version=0, born_idx=-1))
             version[path] = 0
         prior = g.latest_version(path, before_idx=idx)
         if prior is not None:
-            g.add_edge(prior.node_id, a_id, USED_BY, LIKELY, evidence)
+            g.add_edge(prior.node_id, a_id, USED_BY, confidence, evidence)
 
 
 def version_chain(g: ProvGraph, key: str) -> list[str]:

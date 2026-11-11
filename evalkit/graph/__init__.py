@@ -14,6 +14,7 @@ from __future__ import annotations
 from .schema import (
     CERTAIN,
     CONFIDENCE_LEVELS,
+    CONNECTED_BY,
     EDGE_KINDS,
     GENERATED_BY,
     INFORMED_BY,
@@ -35,6 +36,7 @@ __all__ = [
     "GraphError",
     "GENERATED_BY",
     "USED_BY",
+    "CONNECTED_BY",
     "INFORMED_BY",
     "EDGE_KINDS",
     "CERTAIN",

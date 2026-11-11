@@ -39,6 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--format", default="text", choices=("text", "mermaid", "dot", "html"),
                    help="text reads in a terminal; html is interactive "
                         "(needs graphviz); mermaid and dot need a renderer")
+    p.add_argument("--annotate", action="store_true",
+                   help="overlay step-level annotation controls on the graph "
+                        "page (adds a Label section to each activity's side "
+                        "panel, with Export/Import JSON in the top-right)")
     p.add_argument("--direction", default="LR", choices=("LR", "TD"),
                    help="mermaid layout direction")
     p.add_argument("--timeline", action="store_true",
@@ -72,6 +76,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{k}: {v}")
     elif args.artifacts:
         print(artifacts.to_text(g, include_pids=args.include_pids))
+    elif args.annotate:
+        # Flag-style annotation overlay: on the graph page, each activity's
+        # side panel gets a tag chip set + optional comment. Most steps stay
+        # unlabelled; the export surfaces outliers for agent tuning.
+        from graph.annotate_schema import STARTER_TAGSET
+        from graph import html as html_mod
+        prompts = list(getattr(ir, "prompts", ()) or ())
+        responses = dict(getattr(ir, "responses_by_turn", {}) or {})
+        tdm: dict[int, int] = {}
+        official = getattr(ir, "official", None)
+        if official is not None:
+            for ot in getattr(official, "turns", ()) or ():
+                if ot.duration_s is not None:
+                    tdm[ot.turn] = int(ot.duration_s * 1000)
+        try:
+            print(html_mod.to_html(
+                g, turns=args.turns, min_confidence=args.min_confidence,
+                hide_isolated=args.hide_isolated, direction=args.direction,
+                prompts=prompts, responses_by_turn=responses,
+                turn_duration_ms=tdm, tagset=STARTER_TAGSET))
+        except html_mod.HtmlError as exc:
+            print(f"[error] {exc}", file=sys.stderr)
+            return 2
     elif args.format != "text":
         from graph import html as html_mod
         fn = {"mermaid": export.to_mermaid, "dot": export.to_dot,
@@ -80,6 +107,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.format == "html":
             # What the user asked, per turn: the label on an overview card.
             extra["prompts"] = list(getattr(ir, "prompts", ()) or ())
+            # What the model replied, per turn. A turn can have several text
+            # messages (one before each tool, one after); the renderer picks
+            # the last as the "final reply", which is what a reader sees as
+            # the turn's conclusion.
+            extra["responses_by_turn"] = dict(
+                getattr(ir, "responses_by_turn", {}) or {})
+            # Per-turn wall-clock from the official record (`turn_duration`
+            # in Kiro's own metering). Per-action timestamps are not in the
+            # jsonl, so this is the only source of "how long did this turn
+            # last" short of file mtimes. ms, so the html side has one unit.
+            tdm: dict[int, int] = {}
+            official = getattr(ir, "official", None)
+            if official is not None:
+                for ot in getattr(official, "turns", ()) or ():
+                    if ot.duration_s is not None:
+                        tdm[ot.turn] = int(ot.duration_s * 1000)
+            extra["turn_duration_ms"] = tdm
         if args.timeline and args.format == "mermaid":
             print("[warn] --timeline has no effect on mermaid output",
                   file=sys.stderr)

@@ -77,6 +77,11 @@ def classify(g: ProvGraph, include_pids: bool = False) -> list[Fate]:
     for ent in g.entities.values():
         if ent.kind == "pid" and not include_pids:
             continue
+        if ent.kind == "host":
+            # A host is a dependency, not an artifact of the run: nothing was
+            # produced to put somewhere, so classifying it as CONSUMED or
+            # UNCONSUMED would misread what the run did.
+            continue
         consumers = tuple(readers.get(ent.node_id, ()))
         top = newest[ent.key]
         if ent.version == 0 and ent.producer_ref is None:

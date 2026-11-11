@@ -25,7 +25,7 @@ from graph.schema import CERTAIN                                    # noqa: E402
 
 SID = "a1b2c3d4-1111"
 HAVE_DOT = shutil.which("dot") is not None
-needs = unittest.skipUnless(HAVE_DOT, "graphviz not installed; layout unavailable")
+needs_dot = unittest.skipUnless(HAVE_DOT, "graphviz not installed; layout unavailable")
 
 
 def _cmd(idx, command, turn=1, stdout="", purpose=None):
@@ -59,7 +59,7 @@ class TestCamera(unittest.TestCase):
     def setUp(self):
         self.page = html_mod.to_html(build_skeleton(self.ACTS, session_id=SID))
 
-    @needs
+    @needs_dot
     def test_the_svg_fills_the_pane_rather_than_the_drawing(self):
         """Sizing it to the drawing is what made the pane scroll. The markers
         keep their own viewBox, so the check is on the svg element itself."""
@@ -68,30 +68,30 @@ class TestCamera(unittest.TestCase):
         svg_tag = svg_tag[:svg_tag.index(">")]
         self.assertNotIn("viewBox", svg_tag)
 
-    @needs
+    @needs_dot
     def test_a_camera_layer_wraps_the_drawing(self):
         """Everything moves together, so zoom is one transform rather than a
         recompute of every coordinate."""
         self.assertIn('id="view"', self.page)
         self.assertIn("viewG.setAttribute", self.page)
 
-    @needs
+    @needs_dot
     def test_the_view_is_fitted_on_load_and_on_resize(self):
         self.assertIn("fitView();", self.page)
         self.assertIn('addEventListener("resize", fitView)', self.page)
 
-    @needs
+    @needs_dot
     def test_wheel_zooms_about_the_cursor(self):
         """Zooming about the centre instead makes the thing you were looking at
         slide away."""
         self.assertIn('addEventListener("wheel"', self.page)
         self.assertIn("cam.x = mx - before.x * cam.k", self.page)
 
-    @needs
+    @needs_dot
     def test_the_pane_no_longer_scrolls(self):
         self.assertIn("overflow:hidden", self.page)
 
-    @needs
+    @needs_dot
     def test_layout_can_be_switched_and_switched_back(self):
         """Force gives the organic arrangement; layered is the only one that
         guarantees idx order, so returning has to restore exact positions."""
@@ -99,7 +99,7 @@ class TestCamera(unittest.TestCase):
         self.assertIn("layout: layered", self.page)
         self.assertIn("p.x = h.x; p.y = h.y;", self.page)
 
-    @needs
+    @needs_dot
     def test_the_force_pass_keeps_nodes_apart(self):
         """Without collision the labels sat on top of one another as soon as the
         springs pulled nodes together."""
@@ -172,7 +172,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         self.assertIn("style=solid", dot)      # Action.path -> certain
         self.assertIn("style=dashed", dot)     # parsed command -> likely
 
-    @needs
+    @needs_dot
     def test_the_page_carries_a_legend_using_those_same_colours(self):
         from graph.export import EDGE_COLOURS
         from graph.schema import GENERATED_BY, USED_BY
@@ -181,7 +181,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         self.assertIn(EDGE_COLOURS[USED_BY], page)
         self.assertIn(EDGE_COLOURS[GENERATED_BY], page)
 
-    @needs
+    @needs_dot
     def test_the_legend_only_explains_what_the_picture_shows(self):
         """A row for the parsed/declared distinction, on a view where every edge
         is parsed, reads as "everything here is uncertain". It appears only when
@@ -203,7 +203,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
             page2, _re.S).group(1).replace("<\\/", "</"))
         self.assertEqual(v2[0]["confidences"], ["likely"])
 
-    @needs
+    @needs_dot
     def test_a_background_process_is_on_the_picture(self):
         """A review round removed PID nodes entirely -- six diamonds labelled with
         seven-digit numbers were said to take a column of weight for nothing. The
@@ -218,7 +218,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         page = html_mod.to_html(g)
         self.assertIn("e:4242@v1", _payload(page).keys())
 
-    @needs
+    @needs_dot
     def test_every_arrow_leaves_the_action(self):
         """Colour carries the direction of the data. Letting the arrowhead carry
         it as well put arrows into and out of the same card, saying nothing the
@@ -226,7 +226,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         page = html_mod.to_html(build_skeleton(self.ACTS, session_id=SID))
         self.assertIn("const from = write ? e.src : e.dst;", page)
 
-    @needs
+    @needs_dot
     def test_consecutive_actions_are_joined(self):
         """Execution order is a fact the graph does not carry as an edge -- only
         as idx -- so it is drawn as its own quiet layer, dashed and behind
@@ -236,7 +236,7 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         self.assertIn("seq-line", page)
         self.assertIn("execution order, not data", page)
 
-    @needs
+    @needs_dot
     def test_the_legend_can_be_reopened_after_collapsing(self):
         """Collapsing hid the body only; the header and its button sit outside it,
         so there is always something left to click."""
@@ -247,13 +247,13 @@ class TestEdgeColourAndLegend(unittest.TestCase):
         body = page.index('id="lgbody"')
         self.assertLess(hdr, body, "the header must not be inside the folded body")
 
-    @needs
+    @needs_dot
     def test_action_cards_do_not_move(self):
         """They carry the run's order down the page."""
         page = html_mod.to_html(build_skeleton(self.ACTS, session_id=SID))
         self.assertIn('=== "act" || KINDS[n.id] === "turn") continue;', page)
 
-    @needs
+    @needs_dot
     def test_every_read_is_drawn(self):
         """A review round asked for repeated reads of one file to be folded into
         the panel, on the grounds that six near-parallel arcs say one thing six
@@ -381,7 +381,7 @@ class TestPayload(unittest.TestCase):
         self.assertTrue(d["e:/work/suite.yaml@v1"]["outside"])
 
 
-@needs
+@needs_dot
 class TestPage(unittest.TestCase):
 
     def setUp(self):
@@ -441,7 +441,7 @@ class TestPage(unittest.TestCase):
         for v in views:
             labels = {k for k, _ in v["stats"]}
             self.assertIn("files", labels)
-            self.assertIn("links", labels)
+            self.assertIn("duration", labels)
             self.assertTrue({"actions", "turns"} & labels)
 
     def test_the_document_skeleton_is_explicit(self):
@@ -541,7 +541,7 @@ class TestOverviewOrder(unittest.TestCase):
                       for n in self.ov["geometry"]["nodes"]
                       if self.data[n["id"]].get("action") == "turn")
 
-    @needs
+    @needs_dot
     def test_turn_cards_descend_in_turn_order(self):
         cards = self._cards()
         self.assertGreater(len(cards), 2)
@@ -549,7 +549,7 @@ class TestOverviewOrder(unittest.TestCase):
         self.assertEqual(order, sorted(order),
                          f"cards top-to-bottom are turns {order}")
 
-    @needs
+    @needs_dot
     def test_the_overview_runs_down_the_page(self):
         """Top to bottom, so a long run scrolls the way a transcript does."""
         self.assertGreater(self.ov["height"], self.ov["width"])

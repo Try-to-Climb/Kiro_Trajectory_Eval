@@ -28,8 +28,10 @@ import collections
 from . import artifacts
 from . import layout as layout_mod
 from . import overview as overview_mod
+from .annotate_schema import TagSet, tagset_to_dict
 from .export import EDGE_COLOURS, select, to_dot
-from .schema import CERTAIN, GENERATED_BY, USED_BY, ProvGraph, WEAK
+from .schema import (CERTAIN, CONNECTED_BY, GENERATED_BY, USED_BY, ProvGraph,
+                     WEAK)
 
 __all__ = ["to_html", "HtmlError"]
 
@@ -76,6 +78,12 @@ def _node_payload(g: ProvGraph, v) -> dict[str, Any]:
             "ref": a.ref, "idx": a.idx, "turn": a.turn, "action": a.action,
             "purpose": a.purpose or "", "reasoning": a.reasoning or "",
             "command": a.command or "", "path": a.path or "",
+            # What a probe action looked for. Carried as a dict so the renderer
+            # can show the fields it has without inventing the ones it lacks
+            # (`list_dir` has `path` only, `code_search_symbols` has `pattern`
+            # only). Empty for every non-probe action, where the panel reads
+            # `command` / `path` directly.
+            "probe": a.probe or None,
             "isolated": a.node_id not in linked,
             "warnings": by_ref.get(a.ref, []),
             # A call the tool refused is the one case where "no edges" is the
@@ -161,6 +169,7 @@ _PAGE = """<!doctype html>
 
     --ent:#64748b;           /* a file: neutral, the shape carries the meaning */
     --pid:#7c3aed;           /* a background process */
+    --host:#0e7490;          /* a remote endpoint: ssh / docker / k8s */
     --outside:#b45309;       /* an artifact from before the window */
     --ok:#16a34a;
   }}
@@ -207,6 +216,56 @@ _PAGE = """<!doctype html>
   #find:focus {{ border-color:var(--sel);
                  box-shadow:0 0 0 3px rgba(59,130,246,.12); }}
   #find::placeholder {{ color:var(--faint); }}
+
+  /* The user's turn prompt, shown only inside a turn view. Fixed under the
+     header so it does not scroll with the graph; `#app` padding is bumped from
+     JS when the banner is visible so the picture is not covered. */
+  #prompt-banner {{ position:fixed; top:78px; left:0; right:0; z-index:19;
+                    background:#eef2ff; color:#1e293b;
+                    border-bottom:1px solid #c7d2fe;
+                    padding:10px 26px; font-size:16px; line-height:1.4;
+                    display:none; cursor:pointer; }}
+  #prompt-banner.on {{ display:block; }}
+  #prompt-banner .pb-label {{ color:#4338ca; font-weight:700;
+                              font-size:12px; letter-spacing:.04em;
+                              text-transform:uppercase; margin-right:10px; }}
+  #prompt-banner .pb-toggle {{ color:#4338ca; font-weight:700;
+                               font-size:12px; margin-right:8px;
+                               user-select:none; }}
+  #prompt-banner .pb-text {{ white-space:pre-wrap; word-break:break-word; }}
+  /* Collapsed by default: clamp to one line with ellipsis so a long prompt
+     does not cover the graph below. Click the banner to toggle. */
+  #prompt-banner.collapsed .pb-text {{ display:-webkit-box;
+                                       -webkit-line-clamp:1;
+                                       -webkit-box-orient:vertical;
+                                       overflow:hidden;
+                                       max-height:1.4em; }}
+
+  /* The model's final reply for the turn, as a sticky chip at the bottom
+     of the graph pane. The reply is text, not a graph edge -- putting it in
+     the picture would need a layout slot it does not have -- but it still
+     belongs to the turn, so the chip stays visible while the reader scans
+     the actions above. Click opens the full text in the side panel, where
+     a long reply (turn 9 of fff7656b is 20 messages worth) has room. */
+  #reply-chip {{ position:absolute; left:50%; bottom:16px;
+                 transform:translateX(-50%); z-index:10;
+                 display:none; max-width:min(680px, calc(100% - 72px));
+                 padding:9px 16px; border-radius:999px;
+                 background:#ecfdf5; color:#14532d;
+                 border:1px solid #86efac; cursor:pointer;
+                 box-shadow:0 2px 8px rgba(15,118,110,.12);
+                 font: 500 14px/1.3 inherit;
+                 display:none; align-items:center; gap:10px;
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+  #reply-chip.on {{ display:inline-flex; }}
+  #reply-chip:hover {{ background:#d1fae5; border-color:#4ade80; }}
+  #reply-chip .rc-label {{ color:#15803d; font-weight:700;
+                           font-size:12px; letter-spacing:.04em;
+                           text-transform:uppercase; flex:none; }}
+  #reply-chip .rc-preview {{ color:#166534; font-weight:400;
+                             overflow:hidden; text-overflow:ellipsis;
+                             font-family: "Fira Code", ui-monospace, Menlo, monospace;
+                             font-size:12.5px; }}
 
   #app {{ display:flex; height:100%; padding-top:78px; overflow:hidden;
           position:relative; z-index:1; }}
@@ -293,37 +352,39 @@ _PAGE = """<!doctype html>
 
   /* ---- legend ---------------------------------------------------------- */
   #legend {{ position:fixed; bottom:18px; left:18px; z-index:6;
-             pointer-events:auto; font-size:19.5px; padding:16px 20px;
-             min-width:330px; background:var(--chrome);
-             border:1px solid var(--line); border-radius:10px;
+             pointer-events:auto; font-size:12.5px; padding:10px 13px;
+             min-width:200px; background:var(--chrome);
+             border:1px solid var(--line); border-radius:8px;
              box-shadow:0 2px 10px rgba(15,23,42,.06); }}
   .lghdr {{ display:flex; align-items:center; justify-content:space-between;
-            font-size:15.8px; letter-spacing:.11em; text-transform:uppercase;
-            color:var(--faint); font-weight:700; margin-bottom:9px; }}
-  .lghdr button {{ margin:0; padding:1px 9px; font-size:21px; line-height:18px;
-                   border-radius:6px; }}
+            font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+            color:var(--faint); font-weight:700; margin-bottom:6px; }}
+  .lghdr button {{ margin:0; padding:0 7px; font-size:14px; line-height:14px;
+                   border-radius:5px; }}
   /* Collapsed it stays a labelled pill, not a stub: the header and its button are
      outside #lgbody, so there is always something to click. */
   #legend.off #lgbody {{ display:none; }}
-  #legend.off {{ min-width:0; padding:8px 12px; }}
+  #legend.off {{ min-width:0; padding:6px 9px; }}
   #legend.off .lghdr {{ margin-bottom:0; }}
-  .lgrow {{ display:flex; align-items:center; gap:10px; margin:6px 0;
+  .lgrow {{ display:flex; align-items:center; gap:7px; margin:3px 0;
             white-space:nowrap; color:var(--fg2); }}
-  .lghead {{ color:var(--faint); text-transform:uppercase; letter-spacing:.09em;
-             font-size:15.8px; margin-top:12px; font-weight:700; }}
+  .lghead {{ color:var(--faint); text-transform:uppercase; letter-spacing:.08em;
+             font-size:10.5px; margin-top:8px; font-weight:700; }}
   .lghead:first-child {{ margin-top:0; }}
   .lgdim {{ color:var(--faint); font-weight:400; }}
-  .lgdot {{ width:11px; height:11px; border-radius:3px; flex:none; }}
-  .lgn {{ color:var(--faint); margin-left:auto; padding-left:12px;
+  .lgdot {{ width:9px; height:9px; border-radius:2.5px; flex:none; }}
+  .lgn {{ color:var(--faint); margin-left:auto; padding-left:10px;
           font-variant-numeric:tabular-nums; }}
-  .sw {{ width:22px; height:2.5px; border-radius:2px; flex:none; }}
+  .sw {{ width:17px; height:2px; border-radius:2px; flex:none; }}
   .sw.seq {{ background:repeating-linear-gradient(90deg,var(--line2) 0 2px,
              transparent 2px 7px); }}
-  .shape {{ width:16px; height:20px; flex:none; border:1.4px solid;
+  .shape {{ width:12px; height:15px; flex:none; border:1.2px solid;
             border-radius:2px; }}
   .shape.ent {{ border-color:var(--ent); background:#fff; }}
-  .shape.pid {{ width:15px; height:15px; border-color:var(--pid);
+  .shape.pid {{ width:11px; height:11px; border-color:var(--pid);
                 background:#f5f3ff; transform:rotate(45deg); }}
+  .shape.host {{ width:17px; height:11px; border-color:var(--host);
+                 background:#ecfeff; border-radius:4px; }}
 
   /* ---- side panel ------------------------------------------------------ */
   #bar {{ position:sticky; top:0; z-index:2; padding:18px 24px 15px;
@@ -417,6 +478,7 @@ _PAGE = """<!doctype html>
          placeholder="find a file, an action, a turn…" />
   <div id="sug"></div>
 </header>
+<div id="prompt-banner" aria-live="polite"></div>
 <div id="app">
 <div id="graph">
   <!-- The svg fills the pane and a camera transform on #view does the moving,
@@ -441,6 +503,10 @@ _PAGE = """<!doctype html>
       <g id="nodes"></g>
     </g>
   </svg>
+  <button id="reply-chip" type="button" aria-label="show the model's final reply for this turn">
+    <span class="rc-label">final reply ›</span>
+    <span class="rc-preview"></span>
+  </button>
   <div id="legend">
     <div class="lghdr">legend <button id="lbtn" type="button">–</button></div>
     <div id="lgbody">
@@ -450,11 +516,15 @@ _PAGE = """<!doctype html>
       read &nbsp;<span class="lgdim">file → action</span></div>
     <div class="lgrow"><span class="sw" style="background:{c_gen}"></span>
       write &nbsp;<span class="lgdim">action → file</span></div>
+    <div class="lgrow"><span class="sw" style="background:{c_connect}"></span>
+      connect &nbsp;<span class="lgdim">action → host</span></div>
     <div class="lgrow" id="confrow"></div>
     <div class="lgrow lghead">actions</div>
     <div class="lgrow lghead">nodes</div>
     <div class="lgrow"><span class="shape ent"></span> file version</div>
     <div class="lgrow"><span class="shape pid"></span> background process</div>
+    <div class="lgrow"><span class="shape host"></span> remote endpoint
+      &nbsp;<span class="lgdim">ssh / docker / k8s</span></div>
     <div class="lgrow lghead">order</div>
     <div class="lgrow"><span class="sw seq"></span> ran next
       &nbsp;<span class="lgdim">execution order, not data</span></div>
@@ -530,6 +600,7 @@ for (const id in DATA) {{
   const n = DATA[id];
   KINDS[id] = n.type === "activity" ? (n.action === "turn" ? "turn" : "act")
             : n.kind === "pid" ? "pid"
+            : n.kind === "host" ? "host"
             : n.outside ? "outside" : "ent";
 }}
 // One colour for actions. The card names its own kind on the first line, so a
@@ -557,6 +628,10 @@ function shortLabel(id, raw) {{
   if (n.action === "turn") return "turn " + n.turn;
   if (n.type === "activity") return "a[" + n.idx + "]";
   if (n.kind === "pid") return "PID " + n.key;
+  if (n.kind === "host") {{
+    const i = n.key.indexOf("://");
+    return i < 0 ? n.key : n.key.slice(0, i) + ": " + n.key.slice(i + 3);
+  }}
   const base = n.key.split("/").pop() || n.key;
   return base + (n.version ? "@v" + n.version : "");
 }}
@@ -747,6 +822,58 @@ function drawNodes() {{
       }});
       t.textContent = "PID";
       g.appendChild(t);
+    }} else if (kind === "host") {{
+      // A short rounded rectangle wide enough to hold the scheme label,
+      // tagged on the first line and the endpoint underneath -- a host is
+      // not a file and does not pretend to be one.
+      const w = 86, h = 32, c = 10;
+      SIZE.set(n.id, {{w: w, h: h, shape: "host"}});
+      const key = DATA[n.id].key || "";
+      const i = key.indexOf("://");
+      const scheme = i < 0 ? "host" : key.slice(0, i);
+      const ep = i < 0 ? key : key.slice(i + 3);
+      g.appendChild(el("rect", {{
+        "class": "card", x: -w / 2, y: -h / 2, width: w, height: h,
+        rx: c, ry: c,
+        fill: "#ecfeff", stroke: "var(--host)", "stroke-width": 1.4,
+      }}));
+      // A small desktop-monitor icon on the left tells the eye "this is a
+      // machine on the other side", so the card reads as something external
+      // before the reader parses the scheme label. The three parts (screen,
+      // neck, base) are drawn as plain paths so the icon survives previewers
+      // that strip embedded SVG symbols or filters.
+      const ix = -w / 2 + 9;             // horizontal centre of icon
+      const iy = 0;                      // vertical centre of card
+      const sW = 12, sH = 8;             // screen size
+      // screen outline
+      g.appendChild(el("rect", {{
+        x: ix - sW / 2, y: iy - sH / 2 - 2,
+        width: sW, height: sH, rx: 1.3, ry: 1.3,
+        fill: "none", stroke: "var(--host)", "stroke-width": 1.2,
+      }}));
+      // short neck + wider base, drawn as one path so one stroke serves both
+      g.appendChild(el("path", {{
+        d: `M${{ix}},${{iy + sH / 2 - 2}} L${{ix}},${{iy + sH / 2 + 1}} ` +
+           `M${{ix - 4}},${{iy + sH / 2 + 1.5}} L${{ix + 4}},${{iy + sH / 2 + 1.5}}`,
+        fill: "none", stroke: "var(--host)", "stroke-width": 1.2,
+        "stroke-linecap": "round",
+      }}));
+      const tag = el("text", {{
+        "class": "bdg", x: 5, y: -3, "text-anchor": "middle",
+        fill: "var(--host)",
+        style: "font-size:8.5px;font-weight:700;letter-spacing:.04em",
+      }});
+      tag.textContent = scheme.toUpperCase();
+      g.appendChild(tag);
+      const et = el("text", {{
+        "class": "t3", x: 5, y: 9, "text-anchor": "middle",
+        fill: "var(--host)",
+        style: "font-family:\\"Fira Code\\",ui-monospace,Menlo,monospace;" +
+               "font-size:9.5px",
+      }});
+      const show = ep.length > 18 ? "…" + ep.slice(-17) : ep;
+      et.textContent = show;
+      g.appendChild(et);
     }} else {{
       const w = 21, h = 26, c = 7;
       SIZE.set(n.id, {{w: w, h: h, shape: "doc"}});
@@ -986,6 +1113,18 @@ function show(id, hovering) {{
   if (!n) return;
   if (!hovering) current = id;
   let h = "";
+  if (n.type === "reply") {{
+    // The model's final text for a turn. Not a graph node -- no edges, no
+    // version, no provenance -- but the panel is the right place to show
+    // the long form once the chip at the bottom of the graph is clicked.
+    h += row("", `<span class="lnk" data-open="turn${{n.turn}}">\u2039 back to turn ${{n.turn}}</span>`);
+    h += row("turn", n.turn);
+    h += row("role", "assistant · final reply");
+    h += `<div class="sect"><h2>reply</h2><pre>${{esc(n.text)}}</pre></div>`;
+    body.innerHTML = h;
+    byId.forEach(g => g.classList.remove("sel"));
+    return;
+  }}
   if (n.type === "activity") {{
     if (n.action === "turn") {{
       h += row("turn", n.turn);
@@ -1006,6 +1145,41 @@ function show(id, hovering) {{
               esc(n.warnings.join(String.fromCharCode(10)))}}</pre></div>`;
       if (n.path) h += row("path", esc(n.path));
       if (n.purpose) h += `<div class="sect"><h2>purpose</h2>${{esc(n.purpose)}}</div>`;
+      if (n.probe) {{
+        // What the probe was aimed at. Not an edge: a probe that misses
+        // touches nothing, so the picture does not join it to any file. The
+        // panel still names the file so a reader can see what was searched,
+        // and -- when a version of that path is in the picture -- turns the
+        // name into a jump to the latest version so the reader can see where
+        // the file sits in the rest of the run.
+        let probeRows = "";
+        if (n.probe.pattern)
+          probeRows += row("looked for", `<code>${{esc(n.probe.pattern)}}</code>`);
+        if (n.probe.path) {{
+          // The version that was in the tree *when the probe ran*, which is
+          // the latest one born strictly before this action's idx. A
+          // `scenario.py@v2` born at idx 79 is not what a probe at idx 1 saw,
+          // and linking to it would reverse causality -- the panel would
+          // show the final content as the probe's target.
+          let targetId = null, latestV = -1;
+          for (const did in DATA) {{
+            const dn = DATA[did];
+            if (dn && dn.type === "entity" && dn.kind === "file"
+                && dn.key === n.probe.path
+                && dn.born_idx < n.idx) {{
+              if (dn.version > latestV) {{ latestV = dn.version; targetId = did; }}
+            }}
+          }}
+          probeRows += targetId
+            ? row("in file", `<span class="lnk" data-goto="${{esc(targetId)}}">` +
+                             `${{label(targetId)}}</span>` +
+                             ` <span class="dimtext">(not linked — probe only)</span>`)
+            : row("in file", `<code>${{esc(n.probe.path)}}</code>` +
+                             ` <span class="dimtext">(not in the picture)</span>`);
+        }}
+        if (n.probe.root) probeRows += row("under", `<code>${{esc(n.probe.root)}}</code>`);
+        if (probeRows) h += `<div class="sect"><h2>probe</h2>${{probeRows}}</div>`;
+      }}
       if (n.command) h += `<div class="sect"><h2>command</h2><pre>${{
                            esc(n.command)}}</pre></div>`;
       if (n.reasoning) h += `<div class="sect"><h2>reasoning</h2><pre>${{
@@ -1232,6 +1406,41 @@ function chrome() {{
   sel.innerHTML = VIEWS.map(v =>
       `<option value="${{esc(v.name)}}"${{v.name === view.name ? " selected" : ""}}>${{
        esc(v.title)}}</option>`).join("");
+
+  // The user's prompt frames the turn and sits above the graph; the
+  // model's final reply sits as a chip at the bottom of the graph pane and
+  // opens the full text in the side panel on click. On the overview both
+  // are hidden -- turn cards already carry the prompt, and `all turns` has
+  // no single "final" reply.
+  const pb = document.getElementById("prompt-banner");
+  const rc = document.getElementById("reply-chip");
+  const rcPrev = rc.querySelector(".rc-preview");
+  const app = document.getElementById("app");
+  if (view.prompt) {{
+    pb.innerHTML = `<span class="pb-label">user asked</span>` +
+                   `<span class="pb-toggle">▸</span>` +
+                   `<span class="pb-text">${{esc(view.prompt)}}</span>`;
+    pb.classList.add("on");
+    pb.classList.add("collapsed");
+    pb.querySelector(".pb-toggle").textContent = "▸";
+  }} else {{
+    pb.classList.remove("on"); pb.classList.remove("collapsed");
+    pb.innerHTML = "";
+  }}
+  if (view.reply) {{
+    // One-line preview, trimmed and single-line so the chip stays short.
+    const flat = view.reply.replace(/\\s+/g, " ").trim();
+    rcPrev.textContent = flat.length > 90 ? flat.slice(0, 89) + "\u2026"
+                                          : flat;
+    rc.classList.add("on");
+    rc.dataset.replyId = "reply:" + view.name;
+  }} else {{
+    rc.classList.remove("on");
+    rcPrev.textContent = "";
+    delete rc.dataset.replyId;
+  }}
+  const pbH = view.prompt ? pb.getBoundingClientRect().height : 0;
+  app.style.paddingTop = (78 + pbH) + "px";
 }}
 
 function go(name) {{
@@ -1251,6 +1460,28 @@ document.getElementById("lbtn").addEventListener("click", ev => {{
   ev.stopPropagation();
   const box = document.getElementById("legend");
   ev.target.textContent = box.classList.toggle("off") ? "+" : "–";
+}});
+document.getElementById("prompt-banner").addEventListener("click", ev => {{
+  // Click toggles the user prompt between a single clamped line (default,
+  // so a long prompt does not cover the graph) and the full text. The
+  // app's padding-top tracks the banner's height so the picture stays
+  // visible under either state.
+  ev.stopPropagation();
+  const pb = ev.currentTarget;
+  if (!pb.classList.contains("on")) return;
+  const nowCollapsed = pb.classList.toggle("collapsed");
+  const toggle = pb.querySelector(".pb-toggle");
+  if (toggle) toggle.textContent = nowCollapsed ? "▸" : "▾";
+  const app = document.getElementById("app");
+  app.style.paddingTop = (78 + pb.getBoundingClientRect().height) + "px";
+}});
+document.getElementById("reply-chip").addEventListener("click", ev => {{
+  // The chip opens the pseudo-node written by to_html for this turn's
+  // reply. Stopping propagation keeps the pane's background click (which
+  // calls `fitView`) from firing underneath.
+  ev.stopPropagation();
+  const rid = ev.currentTarget.dataset.replyId;
+  if (rid) show(rid);
 }});
 document.getElementById("fbtn").addEventListener("click", () => {{
   dimming = !dimming;
@@ -1477,6 +1708,7 @@ window.addEventListener("resize", fitView);
 
 render(VIEWS[0].name);
 </script>
+{annotate_block}
 </body>
 </html>
 """
@@ -1558,7 +1790,26 @@ def _card(node: dict[str, Any]) -> dict[str, Any]:
     cols = int((ACT_W - 26) / PROSE_COL)
     body = _cap(_wrap(node.get("purpose") or node.get("path", ""), cols), 2, cols)
     hint = ""
-    if node.get("command"):
+    probe = node.get("probe")
+    if probe:
+        # A probe shows what it looked for on the hint line: `pattern @ path`
+        # or just `path` when there is no pattern, in the same monospace slot
+        # the shell command would use. Keeps the probe visibly different from
+        # a real read -- there is no file-shape node joined to this card --
+        # while giving the reader the one line that says "this searched for
+        # X in Y" without opening the panel.
+        pat = probe.get("pattern") or ""
+        pth = probe.get("path") or probe.get("root") or ""
+        if pat and pth:
+            short = pth.rsplit("/", 1)[-1] or pth
+            hint = f'"{pat}" @ {short}'
+        elif pat:
+            hint = f'"{pat}"'
+        elif pth:
+            hint = pth.rsplit("/", 1)[-1] or pth
+        if len(hint) > cols:
+            hint = hint[:cols - 1] + "\u2026"
+    elif node.get("command"):
         first = " ".join(node["command"].split("\n")[0].split())
         hint = first if len(first) <= cols else first[:cols - 1] + "\u2026"
     elif node.get("path"):
@@ -1641,9 +1892,43 @@ def _trails(g: ProvGraph) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+def _fmt_duration(ms: int) -> str:
+    """Render a millisecond count as the shortest form a reader can scan.
+
+    < 1s   → `<1s`               keep the sign that time passed at all
+    < 60s  → `12s`
+    < 1h   → `3m 4s` or `3m`     drop the trailing `0s`
+    ≥ 1h   → `1h 23m`
+    """
+    if ms <= 0:
+        return "0s"
+    if ms < 1000:
+        return "<1s"
+    s = ms // 1000
+    if s < 60:
+        return f"{s}s"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"{m}m" + (f" {s}s" if s else "")
+    h, m = divmod(m, 60)
+    return f"{h}h" + (f" {m}m" if m else "")
+
+
 def _view(g: ProvGraph, turns, min_confidence, hide_isolated, direction,
-          timeline, ranksep, nodesep, pad, name, title) -> dict[str, Any]:
-    """Everything one view needs: its geometry, its counts, its legend rows."""
+          timeline, ranksep, nodesep, pad, name, title,
+          prompt: str = "", reply: str = "",
+          duration_ms: int = 0) -> dict[str, Any]:
+    """Everything one view needs: its geometry, its counts, its legend rows.
+
+    `prompt` is the user's input for the turn this view holds, if any -- the
+    renderer shows it as a banner below the breadcrumb so a reader opening a
+    turn sees what was asked without going back to the overview card.
+
+    `reply` is the model's final text for the turn, shown as a second banner
+    underneath. A turn can carry several text messages (one between each
+    tool); the "final" is the last of them -- it is what the reader of the
+    live chat saw as the turn's conclusion.
+    """
     v = select(g, turns, min_confidence, hide_isolated)
 
     # Size every card before laying out, so `dot` reserves the room the card
@@ -1653,7 +1938,7 @@ def _view(g: ProvGraph, turns, min_confidence, hide_isolated, direction,
     for a in v.activities:
         cards[a.node_id] = _card({
             "action": a.action, "purpose": a.purpose, "command": a.command,
-            "path": a.path,
+            "path": a.path, "probe": a.probe,
         })
     sizes = {k: (c["w"] / DPI, c["h"] / DPI) for k, c in cards.items()}
 
@@ -1675,13 +1960,21 @@ def _view(g: ProvGraph, turns, min_confidence, hide_isolated, direction,
     return {
         "name": name,
         "title": title,
+        "prompt": prompt,
+        "reply": reply,
         "geometry": geo,
         "width": int(geo["width"]) + pad * 4,
         "height": int(geo["height"]) + pad,
         "stats": [("actions" if name != "overview" else "turns",
                    len(v.activities)),
                   ("files", sum(1 for e in v.entities if e.kind != "pid")),
-                  ("links", len(v.edges))],
+                  # Wall-clock for this view, in milliseconds. The source is
+                  # the official record's `turn_duration` -- per-action
+                  # timestamps are not in the session jsonl, so this is the
+                  # only way to say "how long did this run take". For a turn
+                  # view the caller passes that turn's value; for the
+                  # overview the caller passes the sum across all turns.
+                  ("duration", _fmt_duration(duration_ms))],
         "legend": ([("turn", len(v.activities), TURN_COLOUR)]
                    if name == "overview" else
                    [("action", len(v.activities) - len(refused), ACTION_COLOUR)]
@@ -1705,7 +1998,10 @@ def to_html(g: ProvGraph, turns: Optional[Iterable[int]] = None,
             direction: str = "LR", timeline: bool = False,
             ranksep: float = 0.7, nodesep: float = 0.5,
             with_overview: bool = True,
-            prompts: Sequence[str] = ()) -> str:
+            prompts: Sequence[str] = (),
+            responses_by_turn: Optional[dict[int, list[str]]] = None,
+            turn_duration_ms: Optional[dict[int, int]] = None,
+            tagset: Optional[TagSet] = None) -> str:
     """One page holding an overview and a view per turn.
 
     A 36-turn run is 437 nodes, which is not a picture anyone reads. The overview
@@ -1734,7 +2030,8 @@ def to_html(g: ProvGraph, turns: Optional[Iterable[int]] = None,
             # that crossed fewer edges.
             views.append(_view(ov, None, min_confidence, hide_isolated,
                                direction, True, 0.9, 0.7, pad,
-                               "overview", "all turns"))
+                               "overview", "all turns",
+                               duration_ms=sum((turn_duration_ms or {}).values())))
             # The overview's entities carry the same `e:<key>@v<n>` ids as the
             # turn views but different edges -- theirs point at `a:turnN`. Merged
             # into one payload the later write wins and the overview's panel
@@ -1750,12 +2047,31 @@ def to_html(g: ProvGraph, turns: Optional[Iterable[int]] = None,
 
     wanted = sorted({a.turn for a in g.activities.values()}) \
         if turns is None else sorted(set(turns))
+    rbt = responses_by_turn or {}
+    tdm = turn_duration_ms or {}
     for t in wanted:
+        pr = prompts[t - 1] if 0 < t <= len(prompts) else ""
+        # Last text of the turn: that is what the chat reader saw as the
+        # turn's conclusion. The earlier texts (model's running commentary
+        # between tools) are in the panel's reasoning for individual actions.
+        turn_replies = rbt.get(t) or []
+        rp = turn_replies[-1] if turn_replies else ""
         views.append(_view(g, [t], min_confidence, hide_isolated, direction,
                            True, ranksep, nodesep, pad,
-                           f"turn{t}", f"turn {t}"))
+                           f"turn{t}", f"turn {t}", prompt=pr, reply=rp,
+                           duration_ms=tdm.get(t, 0)))
         payload.update(_node_payload(g, select(g, [t], min_confidence,
                                               hide_isolated)))
+        if rp:
+            # A pseudo-node for the final reply. Not drawn in the picture --
+            # a text block has no edges that would belong in a provenance
+            # graph -- but kept in the payload so `show()` can render the
+            # full text in the side panel. The chip at the bottom of the
+            # pane targets this id.
+            payload[f"reply:turn{t}"] = {
+                "type": "reply", "turn": t, "text": rp,
+                "in": [], "out": [],
+            }
 
     if not views:                                  # nothing to draw
         views.append(_view(g, turns, min_confidence, hide_isolated, direction,
@@ -1766,7 +2082,455 @@ def to_html(g: ProvGraph, turns: Optional[Iterable[int]] = None,
     return _PAGE.format(
         session=html.escape(g.session_id or "(no session)"),
         c_used=EDGE_COLOURS[USED_BY], c_gen=EDGE_COLOURS[GENERATED_BY],
+        c_connect=EDGE_COLOURS[CONNECTED_BY],
         json_palette=json.dumps(PALETTE),
         trails=json.dumps(_trails(g)).replace("</", "<\\/"),
         payload=json.dumps(payload, ensure_ascii=False).replace("</", "<\\/"),
-        views=json.dumps(views, ensure_ascii=False).replace("</", "<\\/"))
+        views=json.dumps(views, ensure_ascii=False).replace("</", "<\\/"),
+        annotate_block=_annotate_block(tagset, g.session_id or ""))
+
+
+
+# ---------------------------------------------------------------------------
+# Flag-style annotation overlay (opt-in via `tagset=STARTER_TAGSET`).
+#
+# A step gets at most one tag plus an optional comment. Most steps stay
+# unlabelled -- the point is to surface outliers for agent tuning, not to
+# characterise every action. The overlay is self-contained CSS + JS appended
+# before `</body>`, and hooks the base `show()` by wrapping the global.
+# Persistence is localStorage per session plus explicit Export/Import JSON.
+# ---------------------------------------------------------------------------
+def _annotate_block(tagset: Optional[TagSet], session_id: str) -> str:
+    if tagset is None or not tagset.tags:
+        return ""
+    ts_json = json.dumps(tagset_to_dict(tagset),
+                         ensure_ascii=False).replace("</", "<\\/")
+    sid = json.dumps(session_id)
+    return f"""
+<style>
+  /* Annotation overlay. Only active when a TagSet is passed to `to_html`.
+     The flag widget is a left-side fixed panel that opens below the
+     `#prompt-banner` when the user clicks an activity. The right-side
+     detail panel is deliberately untouched -- flagging and detail inspection
+     are separate workflows and share the screen rather than stacking. */
+  #ann-bar {{ position:fixed; top:52px; right:16px; z-index:30;
+             display:flex; gap:6px; align-items:center;
+             background:var(--chrome); border:1px solid var(--line);
+             border-radius:8px; padding:6px 10px;
+             font-size:12.5px; color:var(--fg2);
+             box-shadow:0 1px 2px rgba(0,0,0,.04); }}
+  #ann-bar .pg {{ color:var(--write); font-weight:700; margin-right:6px; }}
+  #ann-bar button, #ann-bar label.imp {{
+    background:var(--code); border:1px solid var(--line);
+    color:var(--fg); border-radius:6px;
+    padding:3px 10px; font-size:12px; cursor:pointer;
+    font-family:inherit; }}
+  #ann-bar button:hover, #ann-bar label.imp:hover {{
+    background:var(--chrome); border-color:var(--line3); }}
+
+  #ann-panel {{ position:fixed; left:16px; top:94px; width:320px;
+                z-index:28; display:none;
+                background:var(--chrome); border:1px solid var(--line);
+                border-radius:10px; padding:12px 14px;
+                box-shadow:0 2px 8px rgba(0,0,0,.06);
+                font-size:13px; }}
+  #ann-panel.on {{ display:block; }}
+  #ann-panel .ap-head {{ display:flex; align-items:center;
+                         justify-content:space-between;
+                         margin-bottom:8px; padding-bottom:8px;
+                         border-bottom:1px dashed var(--line2); }}
+  #ann-panel .ap-title {{ font-size:11px; letter-spacing:.08em;
+                          color:var(--fg2); text-transform:uppercase;
+                          font-weight:700; }}
+  #ann-panel .ap-step {{ color:var(--dim); font-size:11.5px;
+                         font-family:ui-monospace,Menlo,monospace;
+                         margin-top:2px; }}
+  #ann-panel .ap-close {{ background:transparent; border:none;
+                          color:var(--dim); cursor:pointer;
+                          font-size:18px; line-height:1; padding:0 4px;
+                          font-family:inherit; }}
+  #ann-panel .ap-close:hover {{ color:var(--fail-fg); }}
+
+  .ann-tags {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }}
+  .ann-tag {{ background:var(--chrome); border:1px solid var(--line);
+              color:var(--fg); border-radius:14px;
+              padding:3px 10px; font-size:12.5px; cursor:pointer;
+              font-family:inherit; }}
+  .ann-tag:hover {{ background:var(--code); border-color:var(--line3); }}
+  .ann-tag.selected {{ background:#fff7ed; border-color:var(--write);
+                       color:var(--write); font-weight:600; }}
+  .ann-clear-btn {{ background:transparent; border:none; color:var(--dim);
+                    cursor:pointer; font-size:12px; padding:3px 6px;
+                    font-family:inherit; }}
+  .ann-clear-btn:hover {{ color:var(--fail-fg); }}
+  .ann-note {{ display:block; width:100%; min-height:52px; margin-top:4px;
+               background:var(--chrome); color:var(--fg);
+               border:1px solid var(--line); border-radius:5px;
+               padding:5px 8px; font-size:12.5px; font-family:inherit;
+               resize:vertical; box-sizing:border-box; }}
+  .ann-note:focus {{ outline:none; border-color:var(--sel); }}
+  .ann-note[disabled] {{ background:var(--code); color:var(--faint);
+                         cursor:not-allowed; }}
+  .ann-note-label {{ font-size:11px; color:var(--dim);
+                     text-transform:uppercase; letter-spacing:.5px;
+                     margin-top:6px; display:block; }}
+  .ann-rules {{ font-size:11px; color:var(--dim); font-style:italic;
+                margin-top:6px; }}
+</style>
+<script>
+(function () {{
+  'use strict';
+  const TAGSET  = {ts_json};
+  const SESSION = {sid};
+  const KEY     = 'evalkit:annotate:' + SESSION;
+  const TAGS    = TAGSET.tags || [];
+  if (!TAGS.length) return;
+
+  // state shape: {{ "<ref>": {{ tag: "...", note: "..." }}, ... }}
+  let state = loadState();
+
+  function loadState() {{
+    try {{
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return {{}};
+      return (JSON.parse(raw) || {{}}).flags || {{}};
+    }} catch (e) {{ return {{}}; }}
+  }}
+  function saveState() {{
+    const payload = {{
+      session: SESSION, tagset_id: TAGSET.id,
+      flags: state, updated_at: new Date().toISOString(),
+    }};
+    try {{ localStorage.setItem(KEY, JSON.stringify(payload)); }}
+    catch (e) {{ console.warn('localStorage write failed', e); }}
+  }}
+  function esc(s) {{
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }}
+
+  // Only activity nodes are flaggable; entities / hosts / pids / overview
+  // turn-cards (action === 'turn') are skipped.
+  function isFlaggable(node) {{
+    return node && node.type === 'activity' && node.action !== 'turn';
+  }}
+
+  function refOfNode(id, node) {{
+    if (node && node.ref) return node.ref;
+    const m = id && id.match(/a:(?:ov:)?(.+)$/);
+    return m ? m[1] : id;
+  }}
+
+  function renderAnnotation(id) {{
+    const panel = document.getElementById('ann-panel');
+    if (!panel) return;
+    const node = (typeof DATA !== 'undefined' ? DATA : {{}})[id];
+    if (!node || !isFlaggable(node)) {{
+      panel.classList.remove('on');
+      bumpProgress();
+      return;
+    }}
+    const ref = refOfNode(id, node);
+    const cur = state[ref] || {{}};
+    const tag = cur.tag || '';
+    const note = cur.note || '';
+
+    const tagChips = TAGS.map(t =>
+      '<button type="button" class="ann-tag' + (t === tag ? ' selected' : '')
+      + '" data-ref="' + esc(ref) + '" data-tag="' + esc(t) + '">'
+      + esc(t) + '</button>'
+    ).join('');
+    const clearBtn = tag
+      ? ' <button type="button" class="ann-clear-btn" data-ref="'
+        + esc(ref) + '" data-clear="1">clear</button>'
+      : '';
+    const rules = TAGSET.house_rule
+      ? '<div class="ann-rules">' + esc(TAGSET.house_rule) + '</div>' : '';
+
+    // A note is only meaningful attached to a flag. Lock the textarea until
+    // a tag is picked; otherwise orphan notes accumulate in localStorage and
+    // mislead the user into thinking they annotated something they did not.
+    const hasTag = !!tag;
+    const notePlaceholder = hasTag ? 'why?' : 'pick a tag first';
+    const noteAttrs = hasTag ? '' : ' disabled';
+
+    panel.innerHTML =
+      '<div class="ap-head">'
+      +   '<div>'
+      +     '<div class="ap-title">flag this step</div>'
+      +     '<div class="ap-step">#' + esc(node.idx)
+      +       ' &middot; ' + esc(node.action)
+      +       ' &middot; <span style="color:var(--sel)">'
+      +       esc(ref) + '</span></div>'
+      +   '</div>'
+      +   '<button type="button" class="ap-close" title="close">&times;</button>'
+      + '</div>'
+      + '<div class="ann-tags">' + tagChips + clearBtn + '</div>'
+      + '<label class="ann-note-label">comment (optional)</label>'
+      + '<textarea class="ann-note" data-ref="' + esc(ref) + '"'
+      +   noteAttrs + ' placeholder="' + esc(notePlaceholder) + '">'
+      +   esc(note) + '</textarea>'
+      + rules;
+    panel.classList.add('on');
+    positionPanel();
+    bumpProgress();
+  }}
+
+  // Position `#ann-panel` just below the prompt banner (`#prompt-banner`).
+  // The banner is itself fixed and its height changes when the user toggles
+  // it between collapsed and expanded; recompute on each `show()`, each
+  // banner click, and on window resize. The header is a fixed 52px bar.
+  function positionPanel() {{
+    const panel = document.getElementById('ann-panel');
+    if (!panel) return;
+    const pb = document.getElementById('prompt-banner');
+    const headerBottom = 52;      // #top is 52px fixed
+    let top = headerBottom + 8;
+    if (pb && pb.classList.contains('on')) {{
+      const rect = pb.getBoundingClientRect();
+      top = Math.max(top, rect.bottom + 8);
+    }}
+    panel.style.top = top + 'px';
+  }}
+
+  function bumpProgress() {{
+    const el = document.getElementById('ann-progress');
+    if (!el) return;
+    const n = Object.keys(state).filter(k => state[k] && state[k].tag).length;
+    el.textContent = n;
+  }}
+
+  function setFlag(ref, tag, note) {{
+    // Invariant: a note is only ever stored alongside a tag. When the tag
+    // goes empty, the note goes with it; this keeps localStorage from
+    // accumulating orphan comments on steps the user never actually flagged.
+    if (!tag) {{ delete state[ref]; saveState(); bumpProgress(); return; }}
+    state[ref] = state[ref] || {{}};
+    state[ref].tag = tag;
+    if (note !== undefined) state[ref].note = note;
+    state[ref].ts = new Date().toISOString();
+    saveState();
+    bumpProgress();
+  }}
+
+  function onClick(ev) {{
+    const closeBtn = ev.target.closest('.ap-close');
+    if (closeBtn) {{
+      const panel = document.getElementById('ann-panel');
+      if (panel) panel.classList.remove('on');
+      return;
+    }}
+    const chip = ev.target.closest('.ann-tag');
+    if (chip && chip.dataset.ref) {{
+      const ref = chip.dataset.ref, tag = chip.dataset.tag;
+      const cur = state[ref] || {{}};
+      // Click the selected tag again to toggle it off.
+      const newTag = cur.tag === tag ? '' : tag;
+      setFlag(ref, newTag, cur.note || '');
+      // Re-render the current panel so chip highlighting + clear button update.
+      if (typeof current !== 'undefined' && current &&
+          typeof show === 'function') show(current, false);
+      return;
+    }}
+    const clr = ev.target.closest('.ann-clear-btn');
+    if (clr && clr.dataset.ref) {{
+      setFlag(clr.dataset.ref, '', '');
+      if (typeof current !== 'undefined' && current &&
+          typeof show === 'function') show(current, false);
+      return;
+    }}
+  }}
+
+  // Comment is auto-saved on every input event. localStorage writes are
+  // synchronous and cheap, and this is simpler than a Save button for the
+  // short notes this UI is for. The textarea is disabled when no tag is
+  // picked, so this handler only ever fires for already-flagged steps.
+  function onNoteInput(ev) {{
+    const el = ev.target;
+    if (!el || !el.classList || !el.classList.contains('ann-note')) return;
+    if (el.disabled) return;
+    const ref = el.dataset.ref;
+    if (!ref) return;
+    const cur = state[ref] || {{}};
+    if (!cur.tag) return;         // defensive: no tag -> no note (invariant)
+    setFlag(ref, cur.tag, el.value);
+  }}
+
+  function exportJSON() {{
+    // Flat list of flagged steps, structured so a human reader sees the
+    // *user's signal* (tag + note) first, then the agent's action, then
+    // the surrounding context. Each entry is self-contained -- the
+    // downstream `tune/` pipeline does not need to re-read the trajectory.
+    const data = (typeof DATA !== 'undefined' ? DATA : {{}});
+    const CTX_WINDOW = 2;
+
+    // idx -> snippet: pick the single-turn entry over the overview copy
+    // (first-write-wins, see refOfNode).
+    const byIdx = {{}};
+    const refToIdx = {{}};
+    for (const id in data) {{
+      const n = data[id];
+      if (!n || n.type !== 'activity' || n.action === 'turn') continue;
+      const ref = refOfNode(id, n);
+      if (byIdx[n.idx] !== undefined) continue;
+      byIdx[n.idx] = {{
+        ref: ref, idx: n.idx, turn: n.turn, action: n.action,
+        purpose: n.purpose || '', reasoning: n.reasoning || '',
+        command: n.command || '', path: n.path || '',
+      }};
+      refToIdx[ref] = n.idx;
+    }}
+
+    function neighboursOf(idx) {{
+      const before = [], after = [];
+      for (let j = idx - CTX_WINDOW; j < idx; j++) {{
+        if (byIdx[j]) before.push(byIdx[j]);
+      }}
+      for (let j = idx + 1; j <= idx + CTX_WINDOW; j++) {{
+        if (byIdx[j]) after.push(byIdx[j]);
+      }}
+      return {{ window: CTX_WINDOW, before: before, after: after }};
+    }}
+
+    const flags = Object.keys(state)
+      .filter(r => state[r] && state[r].tag)
+      .map(r => {{
+        const i = refToIdx[r];
+        const step = (i !== undefined) ? byIdx[i] : {{ ref: r }};
+        const ctx  = (i !== undefined) ? neighboursOf(i) : null;
+        // Order matters: `json.dumps` preserves insertion order and a human
+        // reading this file sees the user signal first, step second, long
+        // context block last.
+        const entry = {{
+          tag: state[r].tag,
+          note: state[r].note || '',
+          ts: state[r].ts || '',
+          step: step,
+        }};
+        if (ctx) entry.context = ctx;
+        return entry;
+      }})
+      .sort((a, b) => ((a.step && a.step.idx) || 0)
+                    - ((b.step && b.step.idx) || 0));
+
+    const payload = {{
+      session: SESSION, tagset_id: TAGSET.id, tags: TAGS,
+      flags: flags, exported_at: new Date().toISOString(),
+    }};
+    const blob = new Blob([JSON.stringify(payload, null, 2)],
+                         {{ type: 'application/json' }});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = SESSION + '.flags.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }}
+
+  function importJSON(ev) {{
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {{
+      try {{
+        const parsed = JSON.parse(reader.result);
+        if (parsed.session && parsed.session !== SESSION &&
+            !confirm('File is for session ' + parsed.session
+                     + '. Import anyway?')) return;
+        // Accept either the flat exported form (preferred) or the raw dict
+        // from a saved localStorage dump.
+        if (Array.isArray(parsed.flags)) {{
+          const next = {{}};
+          for (const f of parsed.flags) {{
+            if (!f || !f.tag) continue;
+            // Support both the new layered shape (step.ref) and the older
+            // flat shape (ref at top-level) so a user does not have to
+            // re-export existing files after the format change.
+            const ref = (f.step && f.step.ref) || f.ref;
+            if (!ref) continue;
+            next[ref] = {{ tag: f.tag, note: f.note || '',
+                          ts: f.ts || '' }};
+          }}
+          state = next;
+        }} else if (parsed.flags && typeof parsed.flags === 'object') {{
+          // Dict shape (older localStorage dump). Keep the same invariant:
+          // only entries with a tag survive.
+          const next = {{}};
+          for (const r in parsed.flags) {{
+            const e = parsed.flags[r];
+            if (e && e.tag) next[r] = {{
+              tag: e.tag, note: e.note || '', ts: e.ts || '' }};
+          }}
+          state = next;
+        }} else {{
+          alert('Not a valid flags file.'); return;
+        }}
+        saveState();
+        bumpProgress();
+        if (typeof current !== 'undefined' && current &&
+            typeof show === 'function') show(current, false);
+      }} catch (e) {{ alert('Could not parse JSON: ' + e.message); }}
+    }};
+    reader.readAsText(f);
+    ev.target.value = '';
+  }}
+
+  function clearAll() {{
+    if (!confirm('Discard all flags on this page?')) return;
+    state = {{}}; saveState(); bumpProgress();
+    if (typeof current !== 'undefined' && current &&
+        typeof show === 'function') show(current, false);
+  }}
+
+  function installBar() {{
+    const bar = document.createElement('div');
+    bar.id = 'ann-bar';
+    bar.innerHTML =
+      '<span class="pg"><span id="ann-progress">0</span> flagged</span>' +
+      '<button id="ann-export" title="Download flagged steps as JSON">export</button>' +
+      '<label class="imp" title="Load flagged steps from JSON">' +
+        'import<input type="file" id="ann-import" accept=".json" hidden></label>' +
+      '<button id="ann-clear" title="Discard all flags">clear</button>';
+    document.body.appendChild(bar);
+    document.getElementById('ann-export').addEventListener('click', exportJSON);
+    document.getElementById('ann-import').addEventListener('change', importJSON);
+    document.getElementById('ann-clear').addEventListener('click', clearAll);
+
+    // The flag widget itself: left-side fixed panel, below `#prompt-banner`.
+    const panel = document.createElement('div');
+    panel.id = 'ann-panel';
+    panel.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(panel);
+
+    // Reposition when the user toggles the prompt banner (height changes).
+    const pb = document.getElementById('prompt-banner');
+    if (pb) pb.addEventListener('click', () => setTimeout(positionPanel, 0));
+    window.addEventListener('resize', positionPanel);
+  }}
+
+  function installHook() {{
+    const orig = window.show;
+    if (typeof orig !== 'function') return;
+    window.show = function (id, hovering) {{
+      const r = orig.call(this, id, hovering);
+      if (!hovering) renderAnnotation(id);
+      return r;
+    }};
+    if (typeof current !== 'undefined' && current) renderAnnotation(current);
+  }}
+
+  function boot() {{
+    installBar();
+    installHook();
+    document.addEventListener('click', onClick);
+    document.addEventListener('input', onNoteInput);
+    bumpProgress();
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', boot);
+  }} else {{
+    boot();
+  }}
+}})();
+</script>
+"""
