@@ -144,7 +144,8 @@ from .core import (
 )
 from .official import OfficialRecord, TurnMeta, child_index, load_official, read_parent
 from .official_loader import iter_official_sessions, load_trace_from_official
-from .mapping import TOOL_ALIASES, canonical_tool, split_subcommands
+from .mapping import (TOOL_ALIASES, apply_cd, canonical_tool,
+                      command_working_dir, split_subcommands)
 from .schema import Action, TraceIR
 from .otel_semconv import (
     action_attributes,
@@ -173,6 +174,8 @@ __all__ = [
     "default_trace_dir",
     "canonical_tool",
     "split_subcommands",
+    "apply_cd",
+    "command_working_dir",
     "TOOL_ALIASES",
     # OTel GenAI semantic alignment
     "action_attributes",

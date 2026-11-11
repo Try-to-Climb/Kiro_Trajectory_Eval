@@ -285,7 +285,8 @@ def cmd_export_otel(args) -> None:
         print(f"[warn] {w}", file=sys.stderr)
     if not ir.actions:
         print("[warn] normalization produced 0 actions", file=sys.stderr)
-    out_json = to_otlp_json(ir, source=src_label, indent=(None if args.compact else 2))
+    out_json = to_otlp_json(ir, source=src_label, indent=(None if args.compact else 2),
+                            include_tool_io=getattr(args, "with_tool_io", False))
     if args.out:
         open(args.out, "w", encoding="utf-8").write(out_json + "\n")
         n_spans = sum(len(ss["spans"]) for rs in json.loads(out_json)["resourceSpans"]
@@ -402,7 +403,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--out", default="", help="output file; prints to stdout if omitted")
     p.add_argument("--compact", action="store_true", help="compact single-line JSON (default indent=2)")
     p.add_argument("--with-responses", action="store_true",
-                   help="project full tool responses as kiro.tool.response (default off, may be very large)")
+                   help="fill Action.response during normalization (default off, may be very large)")
+    p.add_argument("--with-tool-io", action="store_true",
+                   help="project the Opt-In gen_ai.tool.call.arguments / result "
+                        "(spec 2026-10 requires explicit opt-in; may contain sensitive data)")
     p.set_defaults(func=cmd_export_otel)
 
     # orchestration: multi-session panorama (parent + children share a timeline)

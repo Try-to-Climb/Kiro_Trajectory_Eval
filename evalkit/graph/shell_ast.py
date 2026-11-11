@@ -33,6 +33,8 @@ from __future__ import annotations
 import ast
 from typing import Any, Iterable, Mapping, Optional
 
+from normalize import mapping
+
 from . import keys
 
 __all__ = ["available", "extract", "skipped_paths", "ParseFailure"]
@@ -557,6 +559,29 @@ class _Walker:
     # ---- tree traversal ----------------------------------------------
     def walk(self, node) -> None:
         t = node.type
+        if t in self._BRANCH_SCOPES:
+            # Each branch gets its own copy of `self.wd`: a `cd` on the left of
+            # `|` must not be seen on the right. Also save-and-restore around
+            # the pipeline as a whole, because the left branch's `cd` lives in
+            # a subshell at runtime and does not change the caller's directory.
+            saved = self.wd
+            for child in node.children:
+                before = self.wd
+                self.walk(child)
+                self.wd = before
+            self.wd = saved
+            return
+        if t in self._BODY_SCOPES:
+            # The whole body is one isolated scope: a `cd` inside `(…)`, a
+            # function body or any looping/branching construct must not change
+            # the directory the caller sees afterwards. Within the body a `cd`
+            # does still affect subsequent siblings -- that is what `_Walker`
+            # already does, since we recurse normally into the children here.
+            saved = self.wd
+            for child in node.children:
+                self.walk(child)
+            self.wd = saved
+            return
         if t == "comment":
             # Belt and braces: tree-sitter already models a comment as a leaf
             # with no children, so nothing inside it is reachable. Removing this
@@ -580,6 +605,11 @@ class _Walker:
             self._walk_substitutions(node)
             return
         if t == "for_statement":
+            # `cd` inside the loop body may be walked once but at runtime runs
+            # per iteration, and the loop body is not where the caller's
+            # directory changes. Save and restore around the whole statement
+            # so a `cd` in the body does not leak into whatever follows.
+            saved_wd = self.wd
             self.for_statement(node)
             # The word list, and only the word list. `for i in $(seq 1 40)` runs
             # `seq`, which no edge comes of but which a split that claims to name
@@ -596,6 +626,7 @@ class _Walker:
                 if c.type == "do_group":
                     break
                 self._walk_substitutions(c)
+            self.wd = saved_wd
             return
         if t == "redirected_statement":
             self.redirected(node)
@@ -656,6 +687,40 @@ class _Walker:
             return
         for c in node.children:
             self._walk_substitutions(c)
+
+
+    # Within one pipeline *branch*, `cd` does affect the next command -- bash
+    # runs each side of `|` in a subshell, but within that subshell the cd is
+    # live. So `pipeline` counts as sequential for the ancestor check; the leak
+    # from one branch into a sibling branch is prevented in `walk()` by saving
+    # and restoring `self.wd` around each pipeline child.
+    #
+    # A subshell `( cd X; cmd )`, a loop body, an `if` branch and a function
+    # body still end without changing the caller's directory. The loop body
+    # matters most here -- walked once per value, a `cd` inside would be
+    # applied as many times as the list is long. Those scopes are handled with
+    # a save/restore in `walk()` and left out of this set.
+    _SEQUENTIAL = frozenset({"program", "list", "redirected_statement",
+                             "negated_command", "pipeline"})
+
+    # Nodes that split the walk into sibling branches that do not share a
+    # directory. Each child is walked under its own saved `self.wd` so a `cd`
+    # on one side cannot be seen on the other. For bodies rather than
+    # branches (`subshell`, loops, `if`), the whole body is isolated instead.
+    _BRANCH_SCOPES = frozenset({"pipeline"})
+    _BODY_SCOPES = frozenset({"subshell", "function_definition",
+                              "while_statement",
+                              "c_style_for_statement", "if_statement",
+                              "case_statement", "compound_statement"})
+
+    def _is_sequential(self, node) -> bool:
+        """Whether this command runs in the directory the next one will see."""
+        n = node.parent
+        while n is not None:
+            if n.type not in self._SEQUENTIAL:
+                return False
+            n = n.parent
+        return True
 
 
     def command(self, node) -> None:
@@ -726,6 +791,27 @@ class _Walker:
         })
 
         if not name:
+            return
+
+        if base == "cd":
+            # The rule for what `cd X` does lives in `normalize.apply_cd`, so the
+            # coarse fold in `command_working_dir` and this one cannot drift on
+            # what a target means -- only on which targets count, which is the one
+            # question that needs the tree.
+            if self._is_sequential(node):
+                target = positional[0] if positional else ""
+                if "$" in target:
+                    got = keys.expand_vars(_unquote(target), self.env)
+                    target = got if got is not None else target
+                was = self.wd
+                self.wd = mapping.apply_cd(self.wd, _unquote(target))
+                if self.wd is None and was is not None:
+                    # Said out loud: every relative path after this point is now
+                    # unresolvable, and `(isolated)` without a reason is not
+                    # information.
+                    self.skipped.append(
+                        (target or "cd", "the directory after this `cd` cannot be "
+                                         "read from the command text"))
             return
         if base in IGNORED_NAMES:
             return

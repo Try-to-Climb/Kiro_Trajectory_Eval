@@ -72,11 +72,32 @@ class TestStructure(unittest.TestCase):
         self.assertEqual(err["status"]["code"], 2)
 
     def test_arguments_json_encoded(self):
+        # Default include_tool_io=False -> arguments not projected (spec Opt-In)
         sh = [s for s in self.spans if s["name"] == "execute_tool shell"][0]
+        args = [a for a in sh["attributes"] if a["key"] == "gen_ai.tool.call.arguments"]
+        self.assertEqual(args, [])
+
+    def test_arguments_opt_in(self):
+        otlp = build_otlp(self.ir, source="hook", include_tool_io=True)
+        spans = otlp["resourceSpans"][0]["scopeSpans"][0]["spans"]
+        sh = [s for s in spans if s["name"] == "execute_tool shell"][0]
         args = [a for a in sh["attributes"] if a["key"] == "gen_ai.tool.call.arguments"][0]
         # Complex value encoded as JSON string
         parsed = json.loads(args["value"]["stringValue"])
         self.assertEqual(parsed["command"], "ls /tmp")
+
+    def test_span_kinds_all_internal(self):
+        # Spec 2026-10: same-process sub-agents are INTERNAL (=1); all Kiro
+        # spans are INTERNAL.
+        for s in self.spans:
+            self.assertEqual(s["kind"], 1, f"{s['name']} kind should be INTERNAL")
+
+    def test_tool_type_and_description_emitted(self):
+        # execute_tool spans should carry recommended tool.type / description.
+        read_span = [s for s in self.spans if s["name"] == "execute_tool read"][0]
+        keys = {a["key"]: a["value"] for a in read_span["attributes"]}
+        self.assertEqual(keys["gen_ai.tool.type"]["stringValue"], "function")
+        self.assertIn("gen_ai.tool.description", keys)
 
     def test_int_as_string(self):
         # startTimeUnixNano must be a string (OTLP int64 convention)

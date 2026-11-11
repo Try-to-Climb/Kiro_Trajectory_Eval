@@ -785,3 +785,101 @@ class TestARedirectTargetIsAFileByPosition(unittest.TestCase):
         say."""
         self.assertIn("redirect >", self._why("cmd 2> /app/err.log"))
         self.assertIn("redirect >>", self._why("cmd >> /app/err.log"))
+
+
+@unittest.skipUnless(shell_ast.available(), "tree-sitter-bash not installed")
+class TestTheDirectoryMovesWithCd(unittest.TestCase):
+    """A `cd` part-way through a command moves what later paths resolve against.
+
+    One command can run in several directories -- `cd /app; mkdir sub; cd sub;
+    > index.html` -- and `Action.cwd` is a single field, so it cannot say
+    which. Resolving everything against one value put files where they are
+    not: a reviewer reading 1524 external scripts called the results
+    `fabricated path` twice by name. Fabricating a node is worse than missing
+    an edge, because a reader cannot tell.
+
+    The rule for what `cd X` does lives in `normalize.apply_cd`; what is here
+    is when to apply it, which needs the tree -- a `cd` inside `( … )` or a
+    pipeline is gone when the subshell ends.
+    """
+
+    def _pairs(self, cmd, wd="/app"):
+        return {(p, d) for p, d, _ in shell_ast.extract(cmd, wd)}
+
+    # ---- it moves ---------------------------------------------------------
+    def test_a_relative_cd_moves_the_base(self):
+        self.assertEqual(self._pairs("cd sub\necho x > index.html"),
+                         {("/app/sub/index.html", "write")})
+
+    def test_several_cds_compose(self):
+        self.assertEqual(self._pairs("cd /work\ncd a\ncd b\ncat f.txt"),
+                         {("/work/a/b/f.txt", "read")})
+
+    def test_dot_dot(self):
+        self.assertEqual(self._pairs("cd sub\ncd ..\ncat f.txt"),
+                         {("/app/f.txt", "read")})
+
+    def test_an_absolute_cd_needs_no_base(self):
+        self.assertEqual(self._pairs("cd /other\ncat f.txt", None),
+                         {("/other/f.txt", "read")})
+
+    def test_paths_before_and_after_the_cd_differ(self):
+        """The reason a single field cannot answer this."""
+        self.assertEqual(
+            self._pairs("cat before.txt\ncd sub\ncat after.txt"),
+            {("/app/before.txt", "read"), ("/app/sub/after.txt", "read")})
+
+    def test_the_and_and_form(self):
+        self.assertEqual(self._pairs("cd /app && cd sublib && echo x > i.html"),
+                         {("/app/sublib/i.html", "write")})
+
+    # ---- it does not move ------------------------------------------------
+    def test_a_cd_in_a_subshell_does_not_escape(self):
+        self.assertEqual(self._pairs("(cd /tmp; ls)\ncat f.txt"),
+                         {("/app/f.txt", "read")})
+
+    def test_a_cd_in_a_pipeline_does_not_escape(self):
+        self.assertEqual(self._pairs("cd /tmp | tee log.txt\ncat f.txt"),
+                         {("/app/log.txt", "write"), ("/app/f.txt", "read")})
+
+    def test_a_cd_in_a_loop_body_does_not_escape(self):
+        """The body is walked once per value, so a `cd` inside it would be
+        applied as many times as the list is long."""
+        self.assertEqual(self._pairs("for d in a b; do cd $d; done\ncat f.txt"),
+                         {("/app/f.txt", "read")})
+
+    def test_a_cd_in_an_if_does_not_escape(self):
+        """Both branches are walked; only one runs."""
+        self.assertEqual(
+            self._pairs("if true; then cd a; else cd b; fi\ncat f.txt"),
+            {("/app/f.txt", "read")})
+
+    # ---- when it cannot be known ----------------------------------------
+    def test_an_unreadable_cd_clears_the_base(self):
+        """`cd $D` leaves the directory unknown. Keeping the old one resolves
+        `out.txt` to a file that does not exist, and a wrong edge to a real
+        file is worse than no edge (7.1)."""
+        for target in ("$D", "~/x", "-"):
+            self.assertEqual(self._pairs(f"cd {target}\ncat f.txt"), set(), target)
+
+    def test_an_absolute_path_survives_an_unknown_base(self):
+        self.assertEqual(self._pairs("cd $D\ncat /abs/f.txt"),
+                         {("/abs/f.txt", "read")})
+
+    def test_the_cd_itself_is_not_an_edge(self):
+        self.assertEqual(self._pairs("cd /app/sub"), set())
+
+    # ---- a cd within one pipeline branch is live for that branch ---------
+    def test_a_cd_is_live_for_siblings_on_the_same_side_of_a_pipe(self):
+        """`cd /x && cmd file | tool` -- `cmd` sees the new directory.
+
+        `|` binds tighter than `&&`, so this parses as `cd /x && (cmd | tool)`
+        and the `cd` runs in the parent shell before the pipeline. The old
+        ancestry check refused the `cd` because it crossed a `pipeline` node
+        above, so `cmd file` resolved against the outer base instead of `/x`.
+        28 real reads vanished from one session that way, all of them the
+        `cd /project && git show -- path` shape.
+        """
+        self.assertEqual(
+            self._pairs("cd /x && cat f.txt | head", wd=None),
+            {("/x/f.txt", "read")})

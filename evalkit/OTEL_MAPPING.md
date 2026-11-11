@@ -6,7 +6,7 @@ evalkit's `TraceIR` is field-level aligned with the OpenTelemetry **GenAI semant
 
 We explicitly **align only on the vocabulary (semantic conventions); we do not adopt the OTLP wire format as our native model.** Reasons:
 
-- **Stability**: the GenAI agent span spec is currently `Status: Development` (verified 2026-08, split off into `open-telemetry/semantic-conventions-genai`), and its fields will change. Building the foundation on an evolving spec is unstable; keeping it at the boundary (a projection layer) is right.
+- **Stability**: the GenAI agent span spec is currently `Status: Development` (aligned with `open-telemetry/semantic-conventions-genai` 2026-10), and its fields continue to evolve. Building the foundation on an evolving spec is unstable; keeping it at the boundary (a projection layer) is right.
 - **Don't sacrifice the rule engine**: rule's checkers depend on `TraceIR`'s flat `actions[]` (`path`/`command`/`idx` are directly queryable). If the native format became a nested OTLP span tree, matcher/checker would all have to be rewritten to traverse the tree and unpack `arguments` JSON — rewriting the one irreplaceable part with zero functional gain.
 - **Ergonomics**: OTLP is a protobuf wire format, not ideal for direct manipulation in analysis code. Even OTel tools work with in-memory objects and only serialize at the boundary.
 
@@ -33,19 +33,26 @@ a.otel_attributes()             # gen_ai.* / error.* / kiro.* attribute dict
 | `spawn_subagent` | `invoke_agent` | `invoke_agent {invoked agent name}` |
 | Everything else (read/write/shell/grep/code/aws/...) | `execute_tool` | `execute_tool {tool}` |
 
+> **Spec 2026-10 split `invoke_agent` into client / internal spans.** `client` represents a cross-process call to a remote agent service (Bedrock Agents, OpenAI Assistants, ...), span kind=CLIENT with `gen_ai.provider.name` required; `internal` represents same-process dispatch of a child agent (LangChain, CrewAI, ...), span kind=INTERNAL. **Kiro's `spawn_subagent` is same-process dispatch, so the export layer uses INTERNAL for every span (root invoke_agent + child execute_tool)** -- see `otel_export.py`.
+>
+> The full spec `operation.name` vocabulary also includes `create_agent` / `invoke_workflow` / `plan` / `retrieval` / `fetch_response` / `search_memory` / `create_memory` / `update_memory` / `upsert_memory` / `delete_memory` / `create_memory_store` / `delete_memory_store`. Kiro has no corresponding actions today; when adding memory/retrieval-type tools in the future, map them to the upstream standard vocabulary first before considering a custom name.
+
 ## Field Mapping
 
 ### Standard attributes (with OTel conventions)
 
 | TraceIR field | OTel attribute | Spec status |
 |---------------|----------------|-------------|
-| `tool` | `gen_ai.tool.name` | Stable (registry) |
-| `tool_use_id` | `gen_ai.tool.call.id` | registry |
-| `pattern` (spawn_subagent only) | `gen_ai.agent.name` | Development |
-| `path` / `command` / `pattern` / `root` | Composed into `gen_ai.tool.call.arguments` (dict) | registry |
+| `tool` | `gen_ai.tool.name` | Required (execute_tool) |
+| `tool` (lookup) | `gen_ai.tool.type` | Recommended (execute_tool, new in 2026-10) |
+| `tool` (lookup) | `gen_ai.tool.description` | Recommended (execute_tool, new in 2026-10) |
+| `tool_use_id` | `gen_ai.tool.call.id` | Conditionally Required |
+| `pattern` (spawn_subagent only) | `gen_ai.agent.name` | Conditionally Required (invoke_agent) |
+| `path` / `command` / `pattern` / `root` | Composed into `gen_ai.tool.call.arguments` (dict) | **Opt-In** (demoted from CondReq in 2026-10; requires `--with-tool-io` to emit) |
+| `response` | `gen_ai.tool.call.result` | **Opt-In** (requires `--with-tool-io` to emit) |
 | `error` | `error.type` + span status=ERROR | **Stable** |
-| `session_id` (trace) | `gen_ai.conversation.id` | — |
-| `agent_name` (trace) | `gen_ai.agent.name` | Development |
+| `session_id` (trace) | `gen_ai.conversation.id` | Conditionally Required |
+| `agent_name` (trace) | `gen_ai.agent.name` | Conditionally Required |
 | `ts` | span start time | native |
 | `duration_ms` | span duration | native |
 | `completed` / `blocked` / `error` | span status (OK/ERROR/UNSET) | native |
@@ -57,7 +64,7 @@ a.otel_attributes()             # gen_ai.* / error.* / kiro.* attribute dict
 | `action` | `kiro.action` | OTel only has `execute_tool`; no semantic split like read_file/modify_file |
 | `raw_tool` | `kiro.raw_tool` | Original tool name |
 | `reasoning` | `kiro.reasoning` | Agent thinking (official thinking); OTel has no tool-level reasoning. **Collected by default** (only projected when present) |
-| `response` | `kiro.tool.response` | Full tool reply; **not collected by default**, only present with `--with-responses` / `include_responses=True` (can be huge) |
+| `purpose` | `kiro.tool.purpose` | Kiro's built-in call-reason field (`args.__tool_use_purpose`); no OTel counterpart |
 | `blocked` | `kiro.blocked` | **Blocked by policy = intended to call but not executed**; standard spans (representing operations that happened) can't express this |
 | `completed` | `kiro.completed` | — |
 | `turn` / `run` / `idx` | `kiro.turn` / `kiro.run` / `kiro.idx` | Conversation turn / invocation / order; used by evalkit for order judgments |
@@ -124,8 +131,10 @@ ExportTraceServiceRequest
 
 - **traceId** (32 hex) is stably derived from session_id; **spanId** (16 hex) is derived from session+run+idx → idempotent, re-runnable
 - **Time**: hook source uses real ts + duration_ms; official source has empty ts, synthesizes order-preserving nanoseconds by idx (order-preserving only, not wall-clock)
+- **span kind**: INTERNAL for every span (spec 2026-10: same-process sub-agents map to `invoke_agent.internal`)
 - **status**: `error`/`blocked` → ERROR (2); `completed` → OK (1); orphan → UNSET (0)
 - **Attributes**: scalars per OTLP types (int64 encoded as string); composite values (tool arguments) encoded as JSON stringValue
+- **Opt-In**: `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result` are not emitted by default; pass `--with-tool-io` to enable
 
 ## Verification
 

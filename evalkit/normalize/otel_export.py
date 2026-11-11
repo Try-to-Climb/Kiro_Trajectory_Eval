@@ -31,7 +31,10 @@ from . import otel_semconv as sem
 
 # span status code: 0=UNSET 1=OK 2=ERROR
 _STATUS_CODE = {"UNSET": 0, "OK": 1, "ERROR": 2}
-# span kind: GenAI convention uses CLIENT(3) for spans
+# span kind (OTLP enum): CLIENT=3 for cross-process remote calls, INTERNAL=1
+# for same-process. Spec 2026-10 splits invoke_agent into client / internal.
+# Kiro's sub-agent dispatch is all in-process, so every span (root
+# invoke_agent plus child execute_tool) uses INTERNAL.
 _KIND_CLIENT = 3
 _KIND_INTERNAL = 1
 
@@ -89,10 +92,14 @@ def _attrs(d: dict) -> list[dict]:
     return out
 
 
-def build_otlp(ir: TraceIR, source: str = "hook") -> dict:
+def build_otlp(ir: TraceIR, source: str = "hook", *,
+               include_tool_io: bool = False) -> dict:
     """Build the TraceIR into an OTLP/JSON ExportTraceServiceRequest.
 
     source: "hook" | "official" | "hook+official"; written to the resource's kiro.trace.source.
+    include_tool_io: whether to project the Opt-In ``gen_ai.tool.call.arguments``
+        and ``gen_ai.tool.call.result`` (spec 2026-10 requires explicit opt-in).
+        Off by default.
     """
     sid = ir.session_id or "unknown"
     trace_id = _trace_id(sid)
@@ -123,7 +130,7 @@ def build_otlp(ir: TraceIR, source: str = "hook") -> dict:
             "traceId": trace_id,
             "spanId": root_id,
             "name": f"{sem.OP_INVOKE_AGENT} {ir.agent_name or sid[:8]}",
-            "kind": _KIND_CLIENT,
+            "kind": _KIND_INTERNAL,
             "startTimeUnixNano": str(start),
             "endTimeUnixNano": str(max(end, start)),
             "attributes": _attrs({
@@ -149,11 +156,10 @@ def build_otlp(ir: TraceIR, source: str = "hook") -> dict:
             "spanId": _span_id(sid, "act", a.run, a.idx),
             "parentSpanId": run_root_id.get(a.run, run_root_id[runs[0]]),
             "name": sem.span_name(d),
-            "kind": _KIND_CLIENT if a.otel_operation() == sem.OP_INVOKE_AGENT
-                    else _KIND_INTERNAL,
+            "kind": _KIND_INTERNAL,
             "startTimeUnixNano": str(start),
             "endTimeUnixNano": str(max(end, start)),
-            "attributes": _attrs(a.otel_attributes()),
+            "attributes": _attrs(sem.action_attributes(d, include_tool_io=include_tool_io)),
             "status": {"code": _STATUS_CODE[status]},
         }
         spans.append(span)
@@ -175,5 +181,7 @@ def _action_start_ns(a, ir: TraceIR) -> Optional[int]:
     return _parse_ns(a.ts)
 
 
-def to_otlp_json(ir: TraceIR, source: str = "hook", indent: int | None = None) -> str:
-    return json.dumps(build_otlp(ir, source), ensure_ascii=False, indent=indent)
+def to_otlp_json(ir: TraceIR, source: str = "hook", indent: int | None = None,
+                 *, include_tool_io: bool = False) -> str:
+    return json.dumps(build_otlp(ir, source, include_tool_io=include_tool_io),
+                      ensure_ascii=False, indent=indent)

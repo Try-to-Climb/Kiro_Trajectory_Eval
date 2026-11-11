@@ -28,13 +28,33 @@ class TestAttributes(unittest.TestCase):
     def test_execute_tool_attrs(self):
         a = _act(tool="shell", raw_tool="execute_bash", action="run_command",
                  command="ls /tmp", tool_use_id="tu_1")
+        # default off: arguments not projected (spec Opt-In)
         at = a.otel_attributes()
         self.assertEqual(at["gen_ai.operation.name"], OP_EXECUTE_TOOL)
         self.assertEqual(at["gen_ai.tool.name"], "shell")
         self.assertEqual(at["gen_ai.tool.call.id"], "tu_1")
-        self.assertEqual(at["gen_ai.tool.call.arguments"], {"command": "ls /tmp"})
+        self.assertNotIn("gen_ai.tool.call.arguments", at)
+        # tool.type / description are recommended attributes, always on
+        self.assertEqual(at["gen_ai.tool.type"], "extension")
+        self.assertIn("gen_ai.tool.description", at)
         self.assertEqual(at["kiro.action"], "run_command")
         self.assertEqual(at["kiro.raw_tool"], "execute_bash")
+
+    def test_execute_tool_arguments_opt_in(self):
+        a = _act(tool="shell", raw_tool="execute_bash", action="run_command",
+                 command="ls /tmp", tool_use_id="tu_1")
+        at = a.otel_attributes(include_tool_io=True)
+        self.assertEqual(at["gen_ai.tool.call.arguments"], {"command": "ls /tmp"})
+
+    def test_tool_call_result_opt_in(self):
+        a = _act(tool="read", action="read_file", path="/x", response="hello")
+        self.assertNotIn("gen_ai.tool.call.result", a.otel_attributes())
+        self.assertEqual(a.otel_attributes(include_tool_io=True)["gen_ai.tool.call.result"],
+                         "hello")
+
+    def test_purpose_as_kiro_extension(self):
+        a = _act(tool="read", action="read_file", path="/x", purpose="inspect config")
+        self.assertEqual(a.otel_attributes()["kiro.tool.purpose"], "inspect config")
 
     def test_invoke_agent_uses_pattern_as_agent_name(self):
         a = _act(tool="subagent", raw_tool="subagent", action="spawn_subagent",

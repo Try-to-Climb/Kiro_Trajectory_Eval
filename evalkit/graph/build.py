@@ -174,15 +174,21 @@ def build_skeleton(actions: Iterable[Mapping[str, Any]],
 
 
 def command_cwd(a: Mapping[str, Any]) -> Optional[str]:
-    """The directory a command's relative paths are relative to.
+    """The directory a command starts in, before any `cd` of its own.
 
-    Two fields carry one, and they are not the same: `args.working_dir` is where
-    the tool was invoked, `cwd` is where the command ends up, which normalize
-    computes by following a leading `cd`. Picking the wrong one moves a relative
-    path to a different tree -- `test-suite/engines/scenario.py` under `user/agent_fixes`
-    rather than `user/Agent/example`, which is a node that never existed.
+    Deliberately not `Action.cwd`. That field is normalize's fold of every
+    `cd` in the command -- where it ends up -- and the extractor folds them
+    again as it walks, so starting from the folded value counts each one
+    twice: `cd sub` under `/app` would resolve `out.txt` to
+    `/app/sub/sub/out.txt`.
+
+    `working_dir` is often absent -- 182 of 269 commands in one session
+    carry a `cwd` and no `working_dir` -- and that is fine: those commands
+    open with an absolute `cd`, which needs no base. A command with only a
+    relative `cd` and no `working_dir` has no base at all, and then a
+    relative path is refused rather than resolved against a guess.
     """
-    return a.get("cwd") or (a.get("args") or {}).get("working_dir")
+    return (a.get("args") or {}).get("working_dir")
 
 
 def carry_env(session_env: dict, command: str, response: Any = None) -> None:

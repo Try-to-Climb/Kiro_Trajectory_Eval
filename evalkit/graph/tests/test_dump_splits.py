@@ -294,10 +294,21 @@ class TestItFollowsTheRealFlow(unittest.TestCase):
         self.assertIn("_command_paths", src)
 
     def test_the_working_directory_reaches_the_extractor(self):
-        """A relative path is unresolvable without it."""
-        rec = ds.record(_Action(1, "cat run_capture.py", cwd="/work/proj"))
+        """A relative path is unresolvable without it.
+
+        `working_dir` and not `cwd`: the latter is normalize's fold of the
+        command's own `cd`s, and the extractor folds them again while
+        walking, so starting from it counts each one twice."""
+        rec = ds.record(_Action(1, "cat run_capture.py", wd="/work/proj"))
         self.assertIn(("/work/proj/run_capture.py", "read"),
                       {(p, d) for p, d, _ in rec["edges"]})
+
+    def test_the_folded_cwd_is_not_used_as_the_start(self):
+        """`cd sub` under `/app` resolves to `/app/sub`, not `/app/sub/sub`."""
+        rec = ds.record(_Action(1, "cd sub\ncat f.txt", wd="/app",
+                                cwd="/app/sub"))
+        self.assertEqual({(p, d) for p, d, _ in rec["edges"]},
+                         {("/app/sub/f.txt", "read")})
 
     @needs_tree
     def test_a_carried_variable_reaches_the_extractor(self):

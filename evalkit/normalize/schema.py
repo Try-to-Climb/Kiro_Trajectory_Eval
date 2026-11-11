@@ -85,10 +85,15 @@ class Action:
         from .otel_semconv import operation_of
         return operation_of(self.action)
 
-    def otel_attributes(self) -> dict[str, Any]:
-        """Project into an OTel span attribute dict (gen_ai.* / error.* / kiro.*)."""
+    def otel_attributes(self, *, include_tool_io: bool = False) -> dict[str, Any]:
+        """Project into an OTel span attribute dict (gen_ai.* / error.* / kiro.*).
+
+        ``include_tool_io``: whether to project the Opt-In
+        ``gen_ai.tool.call.arguments`` / ``gen_ai.tool.call.result``
+        (spec 2026-10 requires explicit opt-in).
+        """
         from .otel_semconv import action_attributes
-        return action_attributes(self.to_dict())
+        return action_attributes(self.to_dict(), include_tool_io=include_tool_io)
 
 
 @dataclass
@@ -122,6 +127,12 @@ class TraceIR:
     agent_name: Optional[str] = None
     prompts: list[str] = field(default_factory=list)      # user input per turn
     responses: list[str] = field(default_factory=list)     # response preview from stop events
+    # Assistant text replies grouped by turn. A single turn can have more than one
+    # (the model may "say something -> call a tool -> say more -> call a tool ->
+    # say more"), hence list values. The flat `responses` is left alone because
+    # downstream efficiency/goal consumers index it positionally; this new field
+    # is only used by the graph layer (html).
+    responses_by_turn: dict[int, list[str]] = field(default_factory=dict)
     actions: list[Action] = field(default_factory=list)
     thinkings: list[Thinking] = field(default_factory=list)  # all thinking segments (including those without toolUse)
     warnings: list[str] = field(default_factory=list)      # data issues discovered during parsing
@@ -189,6 +200,7 @@ class TraceIR:
             "runs": self.runs,
             "prompts": self.prompts,
             "responses": self.responses,
+            "responses_by_turn": self.responses_by_turn,
             "warnings": self.warnings,
             "official": (self.official.to_dict() if self.official is not None else None),
             "actions": [a.to_dict() for a in self.actions],
@@ -200,12 +212,14 @@ class TraceIR:
         from .otel_semconv import trace_attributes
         return trace_attributes(self)
 
-    def to_otel_spans(self) -> list[dict[str, Any]]:
+    def to_otel_spans(self, *, include_tool_io: bool = False) -> list[dict[str, Any]]:
         """Project the whole trajectory into a list of "semantic spans" (pure dicts, not the OTLP wire format).
 
         One span per action: {name, operation, status, start, duration_ms, attributes}.
         This is the product of "semantic alignment"; when you actually need to emit
         OTLP, feed these dicts to the official SDK.
+
+        ``include_tool_io``: whether to project the Opt-In tool.call.arguments / result.
         """
         from .otel_semconv import span_name, span_status
         spans = []
@@ -217,6 +231,6 @@ class TraceIR:
                 "status": span_status(d),
                 "start": a.ts,
                 "duration_ms": a.duration_ms,
-                "attributes": a.otel_attributes(),
+                "attributes": a.otel_attributes(include_tool_io=include_tool_io),
             })
         return spans

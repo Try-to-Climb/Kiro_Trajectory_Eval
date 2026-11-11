@@ -22,6 +22,7 @@ from .mapping import (
     SIMPLE_ACTIONS,
     WRITE_ACTIONS,
     canonical_tool,
+    command_working_dir,
     split_subcommands,
     norm_param,
     unknown_action,
@@ -245,11 +246,15 @@ def _expand_from_tool(raw_tool: str, args: dict, warnings: list[str]) -> list[di
         command = args.get("command") or ""
         if not isinstance(command, str):
             command = str(command)   # N5: command is occasionally non-string; coerce before splitting
+        # Effective working directory: a `cd` inside the command wins over the
+        # `working_dir` kwarg. Process cwd (hook source has it, official does
+        # not) is filled in by the caller; it is not visible here.
         return [{
             "action": "run_command",
             "command": command,
             "subcommands": split_subcommands(command),
             "root": args.get("working_dir"),
+            "cwd": command_working_dir(command) or args.get("working_dir"),
         }]
 
     if tool in ("grep", "glob"):
@@ -396,6 +401,13 @@ def normalize_events(
                 sid=session_id, ref=f"{session_id[:8]}#{idx}",
                 path=_norm_path(part.get("path"), call.pre.get("cwd")),
                 root=_norm_path(part.get("root"), call.pre.get("cwd")),
+                # Only run_command carries a cwd key. The `cd` target and
+                # `working_dir` are resolved at fan-out time; the process cwd
+                # (hook source only) is the last fallback. Absolute targets are
+                # unaffected by _norm_path.
+                cwd=(_norm_path(part.get("cwd") or call.pre.get("cwd"),
+                                call.pre.get("cwd"))
+                     if "cwd" in part else None),
                 command=part.get("command"),
                 subcommands=part.get("subcommands", []),
                 pattern=part.get("pattern"),

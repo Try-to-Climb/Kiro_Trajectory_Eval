@@ -54,15 +54,17 @@ class TestReasoningResponse(unittest.TestCase):
 
     def test_otel_projection(self):
         ir = load_trace_from_official(self.sid, official_dir=self.d, include_responses=True)
-        attrs = action_attributes(ir.actions[0].to_dict())
+        # Spec 2026-10: tool response is projected through the standard
+        # gen_ai.tool.call.result (Opt-In).
+        attrs = action_attributes(ir.actions[0].to_dict(), include_tool_io=True)
         self.assertEqual(attrs["kiro.reasoning"], "I need to read the config file before deciding")
-        self.assertIn("file content ABC", attrs["kiro.tool.response"])
+        self.assertIn("file content ABC", attrs["gen_ai.tool.call.result"])
 
     def test_otel_projection_no_response_when_off(self):
         ir = load_trace_from_official(self.sid, official_dir=self.d)  # default off
         attrs = action_attributes(ir.actions[0].to_dict())
-        self.assertIn("kiro.reasoning", attrs)          # reasoning present by default
-        self.assertNotIn("kiro.tool.response", attrs)   # response absent by default
+        self.assertIn("kiro.reasoning", attrs)                 # reasoning present by default
+        self.assertNotIn("gen_ai.tool.call.result", attrs)     # tool response absent by default
 
 
 if __name__ == "__main__":

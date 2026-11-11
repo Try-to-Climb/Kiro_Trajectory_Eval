@@ -330,6 +330,42 @@ closed extraction gaps that the pure-regex approach could not reach,
 and surfaced several upstream tree-sitter-bash defects documented under
 `reported/`.
 
+### Task 7 step 3: Follow `cd` by position inside one command (done)
+
+`Action.cwd` is one field per command and so can only name one directory.
+But a command can walk through several:
+`cd /app && mkdir sub && cd sub && echo x > index.html`, or
+`cd /project && git show A -- file.h ; cd /release && git show B -- file.h`.
+Resolving every relative path against the folded value put files where they
+are not -- external reviewers on a 1524-script corpus named this `fabricated
+path` twice. A fabricated node is harder to catch than a missing edge.
+
+Fix splits the responsibility:
+- **Rule** (`normalize.apply_cd`): pure function, `cd /x` overwrites, `cd y`
+  composes, `cd $VAR / ~ / -` return `None`. Unknown returns `None`
+  deliberately -- keeping a stale base resolves relative paths to a
+  same-named file in another tree, which is worse than having no base.
+- **Traversal** (`graph.shell_ast._Walker`): applies `apply_cd` at the
+  position of each `cd` in the AST. `pipeline` branches get per-branch
+  save/restore (bash runs each side of `|` in its own subshell, so a `cd`
+  on one side does not reach the other). Subshells, function bodies, loops,
+  `if`, `case`, and compound statements save and restore around the whole
+  body (the body may be walked once but at runtime runs per iteration, so a
+  `cd` inside must not leak to subsequent siblings).
+
+`graph.build.command_cwd` now reads `args.working_dir` rather than
+`Action.cwd`, because `Action.cwd` is normalize's fold of the same `cd`s the
+walker will walk -- starting from it would count each one twice.
+
+Measured on four corpora (edges keyed by `(idx, path, direction)`):
+
+| corpus | before | after | note |
+|---|---|---|---|
+| ft (1 session, 68 commands) | 217 | 223 | two `cd`s in one command resolve to two halves; `origin/master..HEAD` revranges no longer mistaken for paths |
+| eval (1 session) | 72 | 72 | 4 path corrections (`cd experiments/...` and relative paths after) |
+| external corpus (1524 scripts) | 2169 | 2119 | 111 path corrections (fabricated nodes moved to the real directory); 51 refusals (`cd ~/scratch` / `cd $(mktemp -d)` -- only known at runtime) |
+| 50-session sweep | 665 | 665 | no net loss, no path change elsewhere -- the new semantics is transparent to commands that do not use `cd` |
+
 ### Task 8 (optional): weak-evidence candidates + LLM patch
 
 Not implemented in this cut. See AgentTrails §2.4 for the intended shape;

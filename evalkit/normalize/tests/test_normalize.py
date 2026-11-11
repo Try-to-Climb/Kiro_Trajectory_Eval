@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import unittest
 
-from normalize import normalize_events, split_subcommands
+from normalize import (apply_cd, command_working_dir, normalize_events,
+                       split_subcommands)
 
 
 def pre(tool, tool_input, ts="2026-08-04T10:00:00.000Z"):
@@ -308,6 +309,126 @@ class TestDerived(unittest.TestCase):
              "session_id": "s", "turn": 1, "response_preview": "ok"},
         ])
         self.assertTrue(any("stop event missing" in w for w in ir.warnings))
+
+
+def pre_cwd(tool, tool_input, cwd, ts="2026-08-04T10:00:00.000Z"):
+    """A pre_tool_use event carrying the agent process cwd (hook source only)."""
+    e = pre(tool, tool_input, ts)
+    e["cwd"] = cwd
+    return e
+
+
+class TestApplyCd(unittest.TestCase):
+    """What `cd X` does to a directory, as a pure function.
+
+    The rule lives here and the traversal lives with the caller, because the
+    two need different things. The rule is string arithmetic. Deciding which
+    `cd`s count needs the command's structure -- a `cd` inside `( … )` or a
+    pipeline is gone when the subshell ends -- and that needs a syntax tree,
+    which only `graph` has. So `command_working_dir` below folds with a coarse
+    string split and `graph` folds while walking the tree, and both call this.
+    """
+
+    def test_absolute_overwrites(self):
+        self.assertEqual(apply_cd(None, "/app"), "/app")
+        self.assertEqual(apply_cd("/elsewhere", "/app"), "/app")
+
+    def test_relative_composes(self):
+        self.assertEqual(apply_cd("/app", "sub"), "/app/sub")
+        self.assertEqual(apply_cd("/app", "./bin"), "/app/bin")
+        self.assertEqual(apply_cd("/app/x", ".."), "/app")
+
+    def test_relative_without_a_base_is_unknown(self):
+        self.assertIsNone(apply_cd(None, "sub"))
+
+    def test_what_the_command_text_cannot_answer(self):
+        for target in ("~/scratch", "$DIR", "${D}/x", "*/x", "-", ""):
+            self.assertIsNone(apply_cd("/app", target), target)
+
+    def test_a_quoted_target_with_a_space(self):
+        self.assertEqual(apply_cd("/app", '"my dir"'), "/app/my dir")
+
+
+class TestCommandWorkingDir(unittest.TestCase):
+    """The pure parser. `working_dir` is a shell-tool argument the model often
+    omits, so the command's own `cd` is the real base for its relative paths --
+    neither the working_dir arg nor the agent process cwd."""
+
+    def test_absolute_cd(self):
+        self.assertEqual(
+            command_working_dir("cd /repo/x && grep -n foo sub/file.c"),
+            "/repo/x")
+
+    def test_no_cd_is_none(self):
+        self.assertIsNone(command_working_dir("grep -n foo /abs/file.c"))
+
+    def test_relative_cd_is_not_a_base(self):
+        """`cd ..` cannot resolve another relative path."""
+        self.assertIsNone(command_working_dir("cd .. && ls"))
+
+    def test_variable_cd_is_not_a_base(self):
+        self.assertIsNone(command_working_dir("cd $ROOT && ls file.c"))
+
+    def test_every_cd_is_folded_not_only_the_first(self):
+        """It used to take the first absolute literal and stop, on the grounds
+        that one `cd` up front is the dominant shape. True of the agent whose
+        traces shaped this; not true of people. 130 of 1524 reference solutions
+        in an external corpus hold more than one `cd`, and keeping only the
+        first resolves everything after the second one directory too high -- a
+        node that does not exist."""
+        self.assertEqual(
+            command_working_dir("cd /a && do && cd /b && more"), "/b")
+        self.assertEqual(
+            command_working_dir("cd /app && cd sublib && ls"),
+            "/app/sublib")
+        self.assertEqual(command_working_dir("cd /a/b && cd .. && ls"), "/a")
+
+    def test_an_unreadable_cd_clears_the_base(self):
+        """`cd /app && cd $D && > out.txt` has no base for `out.txt`. Keeping
+        `/app` would name a file that does not exist, and a wrong edge to a
+        real file is worse than no edge."""
+        self.assertIsNone(command_working_dir("cd /app && cd $D && ls f.c"))
+        self.assertIsNone(command_working_dir("cd /app && cd ~/x && ls f.c"))
+        self.assertIsNone(command_working_dir("cd /app && cd - && ls f.c"))
+
+    def test_quoted_target(self):
+        self.assertEqual(command_working_dir('cd "/a b/c" && ls'), "/a b/c")
+
+    def test_cd_not_at_the_start(self):
+        self.assertEqual(command_working_dir("echo hi && cd /repo && ls"),
+                         "/repo")
+
+    def test_empty(self):
+        self.assertIsNone(command_working_dir(""))
+
+
+class TestEffectiveCwd(unittest.TestCase):
+    """The `cwd` field on run_command Actions, end to end through the hook
+    path. Priority: command `cd` > working_dir arg > process cwd."""
+
+    def test_cd_beats_working_dir_arg(self):
+        ir = normalize_events([prompt(), pre_cwd(
+            "shell", {"command": "cd /repo/x && ls f.c", "working_dir": "/wd"},
+            cwd="/proc/here")])
+        self.assertEqual(ir.actions[0].cwd, "/repo/x")
+
+    def test_working_dir_arg_beats_process_cwd(self):
+        ir = normalize_events([prompt(), pre_cwd(
+            "shell", {"command": "ls f.c", "working_dir": "/wd"},
+            cwd="/proc/here")])
+        self.assertEqual(ir.actions[0].cwd, "/wd")
+
+    def test_process_cwd_is_the_last_resort(self):
+        ir = normalize_events([prompt(), pre_cwd(
+            "shell", {"command": "ls f.c"}, cwd="/proc/here")])
+        self.assertEqual(ir.actions[0].cwd, "/proc/here")
+
+    def test_non_command_actions_have_no_cwd(self):
+        """cwd is meaningful only for run_command; a read must not inherit the
+        process directory into this field."""
+        ir = normalize_events([prompt(), pre_cwd(
+            "read", {"operations": [read_op("/a.md")]}, cwd="/proc/here")])
+        self.assertIsNone(ir.actions[0].cwd)
 
 
 if __name__ == "__main__":
